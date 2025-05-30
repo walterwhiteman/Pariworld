@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pariworld 🌸</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right, #ffe6f0, #e0f7fa);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    #chat {
+      width: 90%;
+      max-width: 500px;
+      height: 70vh;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      padding: 1rem;
+      overflow-y: auto;
+      overflow-wrap: break-word;
+    }
+    #form {
+      width: 90%;
+      max-width: 500px;
+      display: flex;
+      margin-top: 1rem;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 0.5rem;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+    button {
+      background: #f48fb1;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      color: white;
+      margin-left: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #ec407a;
+    }
+    .msg {
+      margin-bottom: 0.5rem;
+      word-wrap: break-word;
+    }
+    .me {
+      color: #00695c;
+      font-weight: bold;
+    }
+    .you {
+      color: #ad1457;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="chat"></div>
+  <form id="form">
+    <input type="text" id="msg" placeholder="Type a message..." required autocomplete="off" />
+    <button>Send</button>
+  </form>
+
+  <script type="module">
+    import SimplePeer from 'https://cdn.skypack.dev/simple-peer';
+
+    const chat = document.getElementById('chat');
+    const form = document.getElementById('form');
+    const msgInput = document.getElementById('msg');
+
+    let peer;
+    const isInitiator = location.hash === '#host';
+
+    function log(message, sender) {
+      const div = document.createElement('div');
+      div.classList.add('msg');
+      div.innerHTML = `<span class="${sender}">${sender === 'me' ? 'You' : 'Friend'}:</span> ${message}`;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function startPeer() {
+      peer = new SimplePeer({ initiator: isInitiator, trickle: false });
+
+      peer.on('signal', data => {
+        const encoded = btoa(JSON.stringify(data));
+        // Show code to share with friend
+        prompt('Copy this code and send it to your friend:', encoded);
+      });
+
+      const code = isInitiator
+        ? prompt('Paste signal code from your friend:')
+        : prompt('Paste code from the host:');
+
+      try {
+        peer.signal(JSON.parse(atob(code)));
+      } catch {
+        alert('Invalid code. Please try again.');
+        return;
+      }
+
+      peer.on('connect', () => {
+        log('Connection established! 🌟', 'me');
+      });
+
+      peer.on('data', data => {
+        log(data.toString(), 'you');
+      });
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const message = msgInput.value.trim();
+      if (!message) return;
+      log(message, 'me');
+      peer.send(message);
+      msgInput.value = '';
+    });
+
+    startPeer();
+  </script>
+</body>
+</html>
