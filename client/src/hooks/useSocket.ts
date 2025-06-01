@@ -16,7 +16,7 @@ export function useSocket() {
 
   // Define your backend WebSocket URL here
   // REPLACE 'https://your-backend-name.onrender.com' with your actual Render Backend URL
-  const BACKEND_WS_URL = 'wss://pariworld-backend.onrender.com'; // IMPORTANT: Use wss:// for secure connections
+  const BACKEND_WS_URL = 'wss://pariworld-backend.onrender.com/ws'; // IMPORTANT: Use wss:// for secure connections
 
   /**
    * Initialize WebSocket connection
