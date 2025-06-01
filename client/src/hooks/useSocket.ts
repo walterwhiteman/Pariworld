@@ -14,17 +14,23 @@ export function useSocket() {
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
 
+  // Define your backend WebSocket URL here
+  // REPLACE 'https://your-backend-name.onrender.com' with your actual Render Backend URL
+  const BACKEND_WS_URL = 'wss://pariworld-backend.onrender.com'; // IMPORTANT: Use wss:// for secure connections
+
   /**
    * Initialize WebSocket connection
    */
   const connect = useCallback(() => {
     try {
-      // Determine the correct WebSocket protocol and URL
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      
+      // Use the explicitly defined backend URL
+      // const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"; // No longer needed
+      // const wsUrl = `${protocol}//${window.location.host}/ws`; // No longer needed
+
+      const wsUrl = BACKEND_WS_URL; // <--- Use the constant here
+
       console.log('Connecting to WebSocket:', wsUrl);
-      
+
       const socket = new WebSocket(wsUrl);
       socketRef.current = socket;
 
@@ -33,7 +39,7 @@ export function useSocket() {
         setIsConnected(true);
         setConnectionError(null);
         reconnectAttemptsRef.current = 0;
-        
+
         // Emit connection established event
         emit('connection-established', {});
       };
@@ -42,12 +48,12 @@ export function useSocket() {
         console.log('WebSocket connection closed:', event.code, event.reason);
         setIsConnected(false);
         socketRef.current = null;
-        
+
         // Attempt to reconnect if not a normal closure
         if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
           console.log(`Attempting to reconnect in ${delay}ms... (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttemptsRef.current++;
             connect();
@@ -66,7 +72,7 @@ export function useSocket() {
         try {
           const data = JSON.parse(event.data);
           const { event: eventName, payload } = data;
-          
+
           // Emit the received event to all registered handlers
           const handlers = eventHandlersRef.current.get(eventName);
           if (handlers) {
@@ -97,11 +103,11 @@ export function useSocket() {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    
+
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.close(1000, 'Client disconnecting');
     }
-    
+
     setIsConnected(false);
     socketRef.current = null;
   }, []);
@@ -129,7 +135,7 @@ export function useSocket() {
       eventHandlersRef.current.set(eventName, new Set());
     }
     eventHandlersRef.current.get(eventName)!.add(handler);
-    
+
     // Return cleanup function
     return () => {
       const handlers = eventHandlersRef.current.get(eventName);
@@ -188,7 +194,7 @@ export function useSocket() {
    */
   useEffect(() => {
     connect();
-    
+
     return () => {
       disconnect();
     };
