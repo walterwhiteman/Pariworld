@@ -1,10 +1,21 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import cors from 'cors'; // <--- ADD THIS IMPORT
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// --- ADD THIS CORS CONFIGURATION BLOCK ---
+// This middleware enables Cross-Origin Resource Sharing (CORS)
+// It allows your frontend (on its Render URL) to make requests to this backend.
+app.use(cors({
+  origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: REPLACE WITH YOUR ACTUAL RENDER FRONTEND URL
+  methods: ["GET", "POST", "PUT", "DELETE"], // Allow common HTTP methods
+  credentials: true // Allow cookies and authorization headers if your app uses them
+}));
+// --- END CORS CONFIGURATION BLOCK ---
 
 app.use((req, res, next) => {
   const start = Date.now();
