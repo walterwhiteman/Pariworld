@@ -1,15 +1,17 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import cors from 'cors'; // <--- ADD THIS IMPORT
+import cors from 'cors';
+
+// --- NEW IMPORT FOR DATABASE CONNECTION ---
+import { Pool } from 'pg';
+// --- END NEW IMPORT ---
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// --- ADD THIS CORS CONFIGURATION BLOCK ---
-// This middleware enables Cross-Origin Resource Sharing (CORS)
-// It allows your frontend (on its Render URL) to make requests to this backend.
+// --- EXISTING CORS CONFIGURATION BLOCK ---
 app.use(cors({
   origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: REPLACE WITH YOUR ACTUAL RENDER FRONTEND URL
   methods: ["GET", "POST", "PUT", "DELETE"], // Allow common HTTP methods
@@ -17,6 +19,44 @@ app.use(cors({
 }));
 // --- END CORS CONFIGURATION BLOCK ---
 
+// --- NEW: DATABASE POOL & API KEY SETUP ---
+// Ensure DATABASE_URL and CLEANUP_API_KEY are set as environment variables on Render!
+const connectionString = process.env.DATABASE_URL;
+const CLEANUP_API_KEY = process.env.CLEANUP_API_KEY;
+
+if (!connectionString) {
+    console.error('DATABASE_URL environment variable is not set. Cleanup will not run.');
+    // In a production app, you might want to throw an error or exit here.
+}
+if (!CLEANUP_API_KEY) {
+    console.error('CLEANUP_API_KEY environment variable is not set. Cleanup endpoint will be INSECURE!');
+    // IMPORTANT: In production, you would prevent the app from starting or block access if key is missing.
+}
+
+const pool = new Pool({
+    connectionString: connectionString,
+    ssl: {
+        rejectUnauthorized: false // Required for Neon if not using specific CA certs
+    }
+});
+// --- END NEW: DATABASE POOL & API KEY SETUP ---
+
+
+// --- NEW: AUTHENTICATION MIDDLEWARE (THE "SECRET KEY" CHECKER) ---
+function authenticateCleanup(req: Request, res: Response, next: NextFunction) {
+    // We'll expect the API key in a header named 'X-Cleanup-API-Key' or as a query parameter 'key'
+    const providedKey = req.headers['x-cleanup-api-key'] || req.query.key;
+
+    if (!providedKey || providedKey !== CLEANUP_API_KEY) {
+        console.warn(`[${new Date().toISOString()}] Unauthorized attempt to access cleanup endpoint.`);
+        return res.status(401).send('Unauthorized: Invalid or missing API Key.');
+    }
+    next(); // API key is valid, proceed to the message deletion code
+}
+// --- END NEW: AUTHENTICATION MIDDLEWARE ---
+
+
+// --- EXISTING LOGGING MIDDLEWARE ---
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -46,9 +86,31 @@ app.use((req, res, next) => {
 
   next();
 });
+// --- END EXISTING LOGGING MIDDLEWARE ---
+
 
 (async () => {
-  const server = await registerRoutes(app);
+  // --- NEW: API ENDPOINT FOR MESSAGE CLEANUP ---
+  // This is the "secret door" that the external service will call
+  // Place this BEFORE registerRoutes(app) to ensure it's handled first.
+  app.post('/api/cleanup-messages', authenticateCleanup, async (req: Request, res: Response) => {
+      console.log(`[${new Date().toISOString()}] External cleanup trigger received.`);
+      try {
+          const client = await pool.connect();
+          const query = `DELETE FROM messages WHERE timestamp < NOW() - INTERVAL '24 hours';`;
+          const result = await client.query(query);
+          client.release(); // Release the database connection
+          console.log(`[${new Date().toISOString()}] Successfully deleted ${result.rowCount} messages.`);
+          res.status(200).send(`Successfully deleted ${result.rowCount} messages.`);
+      } catch (err) {
+          console.error(`[${new Date().toISOString()}] Error during external cleanup:`, err);
+          res.status(500).send('Error during cleanup operation.');
+      }
+  });
+  // --- END NEW: API ENDPOINT ---
+
+
+  const server = await registerRoutes(app); // Your existing route registration
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
