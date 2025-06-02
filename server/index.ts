@@ -4,7 +4,8 @@ import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 
 // --- NEW IMPORT FOR DATABASE CONNECTION ---
-import { Pool } from 'pg';
+import pkg from 'pg';
+const { Pool } = pkg;
 // --- END NEW IMPORT ---
 
 const app = express();
