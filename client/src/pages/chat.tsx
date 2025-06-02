@@ -180,7 +180,7 @@ export default function ChatPage() {
         // IMPORTANT FOR 1-ON-1: You MUST replace 'OTHER_USER_USERNAME_HERE'
         // with the actual username of another user logged into the same room
         // for this to work. This is a temporary hardcode for testing.
-        const userToCall = 'OTHER_USER_USERNAME_HERE'; // <--- REPLACE THIS!
+        const userToCall = 'Chandra'; // <--- REPLACE THIS!
 
         if (!userToCall || userToCall === roomState.username) {
             addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
