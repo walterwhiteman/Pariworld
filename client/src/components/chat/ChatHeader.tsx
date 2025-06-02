@@ -1,3 +1,5 @@
+// In src/components/chat/ChatHeader.tsx
+
 import { Users, Video, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -5,7 +7,7 @@ interface ChatHeaderProps {
   roomId: string;
   isConnected: boolean;
   participantCount: number;
-  onStartVideoCall: () => void;
+  onStartVideoCall: () => void; // This is still () => void from ChatHeader's perspective
   onLeaveRoom: () => void;
 }
 
@@ -13,15 +15,15 @@ interface ChatHeaderProps {
  * Chat header component displaying room info and action buttons
  * Shows connection status, participant count, and video call/leave options
  */
-export function ChatHeader({ 
-  roomId, 
-  isConnected, 
-  participantCount, 
-  onStartVideoCall, 
-  onLeaveRoom 
+export function ChatHeader({
+  roomId,
+  isConnected,
+  participantCount,
+  onStartVideoCall,
+  onLeaveRoom
 }: ChatHeaderProps) {
   return (
-    <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 shadow-sm">
+    <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 shadow-sm sticky top-0 z-10"> {/* --- ADDED: sticky top-0 z-10 --- */}
       {/* Room Info */}
       <div className="flex items-center space-x-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500">
@@ -32,7 +34,7 @@ export function ChatHeader({
             Room: {roomId}
           </h1>
           <p className="text-sm text-gray-500">
-            <span 
+            <span
               className={`mr-2 inline-block h-2 w-2 rounded-full ${
                 isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
               }`}
@@ -52,7 +54,7 @@ export function ChatHeader({
         <Button
           variant="ghost"
           size="sm"
-          onClick={onStartVideoCall}
+          onClick={onStartVideoCall} {/* This remains the same, as handleStartVideoCall is () => void */}
           className="text-gray-600 hover:text-blue-600 hover:bg-gray-100"
           disabled={!isConnected}
           title="Start video call"
