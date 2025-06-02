@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 // Import Socket.IO Server instead of ws
-import { Server as SocketIOServer } from 'socket.io'; // <--- NEW IMPORT
+import { Server as SocketIOServer } from 'socket.io';
 import { storage } from "./storage";
 import { RoomParticipant } from "@shared/schema";
 
@@ -96,7 +96,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         usernameToSocketIdMap.forEach((socketId, username) => {
             // Check if this socket is actually in the room (Socket.IO's internal check)
             if (io.sockets.adapter.rooms.get(roomId)?.has(socketId)) {
-                 participants.push(username);
+                    participants.push(username);
             }
         });
         return participants;
@@ -120,6 +120,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 socket.emit('error', { message: 'Room ID and username are required' });
                 return;
             }
+
+            // --- IMPORTANT FIX: Set socket.data here ---
+            socket.data.roomId = roomId;
+            socket.data.username = username;
+            // --- END IMPORTANT FIX ---
 
             // Join the Socket.IO room
             socket.join(roomId);
@@ -202,7 +207,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Get roomId and username from our map, since Socket.IO doesn't automatically expose it this way
             // You might need a more robust way to associate socket.id with roomId and username
             // A common pattern is to store this in a 'socket.data' object on connection or room join.
-            // For now, let's assume we can get it from the map, or from `socket.handshake.auth` if passed during connection.
             // Let's ensure the `join-room` event sets these on the `socket` object for easier access.
             const { roomId, username } = socket.data; // Assumes `socket.data` is set on join
 
@@ -292,7 +296,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             for (const [username, sockId] of usernameToSocketIdMap.entries()) {
                 if (sockId === socket.id) {
                     disconnectedUsername = username;
-                    disconnectedRoomId = socket.data.roomId; // Get roomId from socket.data
+                    // This now correctly gets roomId from socket.data because we set it on join
+                    disconnectedRoomId = socket.data.roomId;
                     usernameToSocketIdMap.delete(username); // Remove from our map
                     break;
                 }
@@ -316,21 +321,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
         });
 
-        // Add a handler for `socket.data` to store room and username
-        // This is a more robust way to access client info associated with the socket
-        socket.on('set-socket-data', (data: { roomId: string; username: string }) => {
-            socket.data.roomId = data.roomId;
-            socket.data.username = data.username;
-        });
+        // The 'set-socket-data' handler is now redundant if join-room sets socket.data
+        // You can remove it if it's not used anywhere else for explicit socket.data setting.
+        // socket.on('set-socket-data', (data: { roomId: string; username: string }) => {
+        //     socket.data.roomId = data.roomId;
+        //     socket.data.username = data.username;
+        // });
 
     });
-
-    // Cleanup heartbeat interval (Socket.IO has its own ping/pong, so less manual needed)
-    // You can remove your custom heartbeatInterval if Socket.IO's default is sufficient,
-    // or keep it if you need more explicit control. For now, let's keep it for compatibility.
-    // However, the `clients` map is no longer relevant for the heartbeat, `io.sockets.sockets` holds active sockets.
-    // Let's simplify and rely on Socket.IO's built-in mechanisms.
-    // No explicit heartbeat loop is typically needed with Socket.IO; it handles ping/pong automatically.
 
     console.log('Socket.IO server initialized on /ws path');
 
