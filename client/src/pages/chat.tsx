@@ -130,21 +130,19 @@ export default function ChatPage() {
             return;
         }
 
-        // Create a temporary client-side message with a client-generated ID
-        const tempMessage: ChatMessage = {
-            ...message,
-            id: generateClientMessageId(), // Client-side ID
-            timestamp: new Date(),
-            isSelf: true
-        } as ChatMessage; // Cast to ChatMessage for local state
+        // OLD LOGIC (Optimistic update that caused duplicates due to ID mismatch from server):
+        // const tempMessage: ChatMessage = {
+        //     ...message,
+        //     id: generateClientMessageId(), // Client-side ID
+        //     timestamp: new Date(),
+        //     isSelf: true
+        // } as ChatMessage;
+        // setRoomState(prev => ({
+        //     ...prev,
+        //     messages: [...prev.messages, tempMessage]
+        // }));
 
-        // Add to local messages immediately
-        setRoomState(prev => ({
-            ...prev,
-            messages: [...prev.messages, tempMessage]
-        }));
-
-        // Send via socket (without client-side ID as DB will generate)
+        // NEW LOGIC (Simpler: Rely only on 'message-received' event from server to add message)
         socket.sendMessage({
             roomId: message.roomId,
             sender: message.sender,
@@ -182,7 +180,7 @@ export default function ChatPage() {
         // IMPORTANT FOR 1-ON-1: You MUST replace 'OTHER_USER_USERNAME_HERE'
         // with the actual username of another user logged into the same room
         // for this to work. This is a temporary hardcode for testing.
-        const userToCall = 'Chandra'; // <--- REPLACE THIS!
+        const userToCall = 'OTHER_USER_USERNAME_HERE'; // <--- REPLACE THIS!
 
         if (!userToCall || userToCall === roomState.username) {
             addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
@@ -222,7 +220,7 @@ export default function ChatPage() {
             setIsRoomModalOpen(false);
             setIsConnecting(false);
 
-            // Add system message
+            // Add system message for *this* user only
             const systemMessage: ChatMessage = {
                 id: generateClientMessageId(), // Use client-side ID for system messages
                 roomId: data.roomId,
@@ -239,7 +237,7 @@ export default function ChatPage() {
         });
 
         // Message History Received
-        const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) => { // <--- FIXED: Added '{' here
+        const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) => {
             console.log('Received message history:', payload.messages.length, 'messages');
             const historyMessages = payload.messages.map(msg => ({
                 ...msg,
@@ -261,7 +259,7 @@ export default function ChatPage() {
                     participants: prev.participants.filter(p => p !== data.username)
                 }));
 
-                // Add system message
+                // Add system message for other users if they leave
                 const systemMessage: ChatMessage = {
                     id: generateClientMessageId(), // Use client-side ID for system messages
                     roomId: data.roomId,
@@ -285,11 +283,12 @@ export default function ChatPage() {
             // Ensure message timestamp is a Date object if coming from server as ISO string
             const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
 
+            // IMPORTANT: With the new handleSendMessage, we always add.
+            // If you later implement robust optimistic updates, this logic will need to
+            // intelligently replace/update a temp message instead of adding a new one.
             setRoomState(prev => ({
                 ...prev,
-                messages: prev.messages.some(msg => msg.id === parsedMessage.id)
-                    ? prev.messages // If message with this ID already exists (e.g., from history), don't add duplicate
-                    : [...prev.messages, parsedMessage]
+                messages: [...prev.messages, parsedMessage]
             }));
         });
 
