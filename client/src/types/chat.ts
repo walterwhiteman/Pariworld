@@ -10,22 +10,25 @@ export interface ChatMessage {
   isSelf?: boolean;
 }
 
-// Socket event types
-export interface SocketEvents {
+// Socket event types (as an ENUM for runtime usage)
+export enum SocketEvents {
   // Client to server events
-  'join-room': (data: { roomId: string; username: string }) => void;
-  'leave-room': (data: { roomId: string; username: string }) => void;
-  'send-message': (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
-  'typing-start': (data: { roomId: string; username: string }) => void;
-  'typing-stop': (data: { roomId: string; username: string }) => void;
-  
+  JoinRoom = 'join-room',
+  LeaveRoom = 'leave-room',
+  SendMessage = 'send-message',
+  TypingStart = 'typing-start',
+  TypingStop = 'typing-stop',
+
   // Server to client events
-  'room-joined': (data: { roomId: string; participants: string[] }) => void;
-  'room-left': (data: { roomId: string; username: string }) => void;
-  'message-received': (message: ChatMessage) => void;
-  'user-typing': (data: { username: string; isTyping: boolean }) => void;
-  'error': (data: { message: string }) => void;
-  'connection-status': (data: { connected: boolean; participantCount: number }) => void;
+  RoomJoined = 'room-joined',
+  RoomLeft = 'room-left',
+  MessageReceived = 'message-received',
+  UserTyping = 'user-typing',
+  Error = 'error',
+  ConnectionStatus = 'connection-status',
+  ConnectionEstablished = 'connection-established', // Added this as it's emitted in useSocket
+  MessageHistory = 'message-history', // Added this as it's used in ChatPage
+  // Add any other events you use or plan to use here
 }
 
 // Room state
