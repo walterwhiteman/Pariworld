@@ -239,4 +239,172 @@ export default function ChatPage() {
         });
 
         // Message History Received
-        const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) =>
+        const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) => { // <--- FIXED: Added '{' here
+            console.log('Received message history:', payload.messages.length, 'messages');
+            const historyMessages = payload.messages.map(msg => ({
+                ...msg,
+                timestamp: new Date(msg.timestamp) // Ensure Date object
+            }));
+            setRoomState(prev => ({
+                ...prev,
+                messages: historyMessages // Set messages from history
+            }));
+        });
+
+        // User left room
+        const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
+            console.log('User left room:', data);
+
+            if (data.username !== roomState.username) {
+                setRoomState(prev => ({
+                    ...prev,
+                    participants: prev.participants.filter(p => p !== data.username)
+                }));
+
+                // Add system message
+                const systemMessage: ChatMessage = {
+                    id: generateClientMessageId(), // Use client-side ID for system messages
+                    roomId: data.roomId,
+                    sender: 'System',
+                    content: `${data.username} left the chat`,
+                    messageType: 'system',
+                    timestamp: new Date()
+                };
+
+                setRoomState(prev => ({
+                    ...prev,
+                    messages: [...prev.messages, systemMessage]
+                }));
+            }
+        });
+
+        // Message received
+        const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
+            console.log('Message received:', message);
+
+            // Ensure message timestamp is a Date object if coming from server as ISO string
+            const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
+
+            setRoomState(prev => ({
+                ...prev,
+                messages: prev.messages.some(msg => msg.id === parsedMessage.id)
+                    ? prev.messages // If message with this ID already exists (e.g., from history), don't add duplicate
+                    : [...prev.messages, parsedMessage]
+            }));
+        });
+
+        // User typing
+        const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
+            console.log('User typing:', data);
+
+            if (data.username !== roomState.username) {
+                setTypingUser(data.isTyping ? data.username : undefined);
+            }
+        });
+
+        // Connection status
+        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
+            console.log('Connection status:', data);
+
+            setRoomState(prev => ({
+                ...prev,
+                isConnected: data.connected,
+                participants: prev.participants // Keep current participants, this event is more for general status
+            }));
+        });
+
+        // Error handling
+        const unsubscribeError = socket.on('error', (data: { message: string }) => {
+            console.error('Socket error:', data);
+
+            addNotification('error', 'Error', data.message);
+            setIsConnecting(false);
+        });
+
+        // Cleanup function
+        return () => {
+            unsubscribeRoomJoined();
+            unsubscribeMessageHistory();
+            unsubscribeRoomLeft();
+            unsubscribeMessageReceived();
+            unsubscribeUserTyping();
+            unsubscribeConnectionStatus();
+            unsubscribeError();
+        };
+    }, [socket, roomState.username, roomState.participants, addNotification]);
+
+    /**
+     * Handle connection errors
+     */
+    useEffect(() => {
+        if (socket.connectionError) {
+            addNotification('error', 'Connection Failed', socket.connectionError);
+            setIsConnecting(false);
+        }
+    }, [socket.connectionError, addNotification]);
+
+    // Added console.log for debugging
+    console.log("ChatPage component is rendering!");
+
+    return (
+        <div className="flex h-screen flex-col bg-gray-50">
+            {/* Room Join Modal */}
+            <RoomJoinModal
+                isOpen={isRoomModalOpen}
+                onJoinRoom={handleJoinRoom}
+                isConnecting={isConnecting}
+            />
+
+            {/* Main Chat Interface */}
+            {!isRoomModalOpen && (
+                <>
+                    {/* Chat Header */}
+                    {/* IMPORTANT: The onStartVideoCall handler is set here to initiate a 1-on-1 call for testing. */}
+                    {/* Remember to replace 'OTHER_USER_USERNAME_HERE' in handleStartVideoCall with a real username. */}
+                    <ChatHeader
+                        roomId={roomState.roomId}
+                        isConnected={roomState.isConnected}
+                        participantCount={roomState.participants.length}
+                        onStartVideoCall={handleStartVideoCall}
+                        onLeaveRoom={handleLeaveRoom}
+                    />
+
+                    {/* Chat Messages */}
+                    <ChatMessages
+                        messages={roomState.messages}
+                        currentUsername={roomState.username}
+                        typingUser={typingUser}
+                    />
+
+                    {/* Message Input */}
+                    <MessageInput
+                        onSendMessage={handleSendMessage}
+                        onTypingStart={handleTypingStart}
+                        onTypingStop={handleTypingStop}
+                        roomId={roomState.roomId}
+                        username={roomState.username}
+                        disabled={!roomState.isConnected}
+                    />
+                </>
+            )}
+
+            {/* Video Call Modal */}
+            <VideoCallModal
+                isOpen={webRTC.callState.isActive}
+                callState={webRTC.callState}
+                localVideoRef={webRTC.localVideoRef}
+                remoteVideoRef={webRTC.remoteVideoRef}
+                onEndCall={webRTC.endCall}
+                onToggleVideo={webRTC.toggleVideo}
+                onToggleAudio={webRTC.toggleAudio}
+                formatCallDuration={webRTC.formatCallDuration}
+            />
+
+            {/* Notifications */}
+            <NotificationToast
+                notifications={notifications}
+                onDismiss={dismissNotification}
+            />
+        </div>
+    );
+}
