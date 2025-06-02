@@ -1,3 +1,5 @@
+// In src/pages/ChatPage.tsx
+
 import { useState, useCallback, useEffect } from 'react';
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
@@ -172,6 +174,37 @@ export default function ChatPage() {
         }
     }, [roomState, socket]);
 
+    // --- REVISED: handleStartVideoCall function for 1-on-1 testing ---
+    const handleStartVideoCall = useCallback(() => {
+        if (!roomState.isConnected) {
+            addNotification('error', 'Call Error', 'Not connected to room.');
+            return;
+        }
+
+        // IMPORTANT FOR 1-ON-1: You MUST replace 'OTHER_USER_USERNAME_HERE'
+        // with the actual username of another user logged into the same room
+        // for this to work. This is a temporary hardcode for testing.
+        const userToCall = 'OTHER_USER_USERNAME_HERE'; // <--- REPLACE THIS!
+
+        if (!userToCall || userToCall === roomState.username) {
+            addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
+            return;
+        }
+
+        // Check if the user to call is actually in the room's participant list
+        if (!roomState.participants.includes(userToCall)) {
+             addNotification('warning', 'Call Info', `${userToCall} is not currently in this room.`);
+             return;
+        }
+
+        webRTC.startCall(userToCall);
+        console.log(`Attempting to call: ${userToCall}`);
+        addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
+
+    }, [roomState, webRTC, addNotification]);
+    // --- END REVISED ---
+
+
     /**
      * Set up socket event listeners
      */
@@ -301,7 +334,7 @@ export default function ChatPage() {
             unsubscribeConnectionStatus();
             unsubscribeError();
         };
-    }, [socket, roomState.username]); // Removed addNotification to prevent infinite loop
+    }, [socket, roomState.username, roomState.participants, addNotification]); // Added addNotification and roomState.participants to dependencies
 
     /**
      * Handle connection errors
@@ -311,7 +344,7 @@ export default function ChatPage() {
             addNotification('error', 'Connection Failed', socket.connectionError);
             setIsConnecting(false);
         }
-    }, [socket.connectionError]); // Removed addNotification to prevent infinite loop
+    }, [socket.connectionError, addNotification]);
 
     // --- ADDED THIS console.log for debugging ---
     console.log("ChatPage component is rendering!");
@@ -334,7 +367,7 @@ export default function ChatPage() {
                         roomId={roomState.roomId}
                         isConnected={roomState.isConnected}
                         participantCount={roomState.participants.length}
-                        onStartVideoCall={webRTC.startCall}
+                        onStartVideoCall={handleStartVideoCall} {/* --- IMPORTANT: Use the new handler here --- */}
                         onLeaveRoom={handleLeaveRoom}
                     />
 
