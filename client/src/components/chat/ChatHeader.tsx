@@ -1,3 +1,5 @@
+// In src/components/chat/ChatHeader.tsx
+
 import { Users, Video, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -5,7 +7,7 @@ interface ChatHeaderProps {
   roomId: string;
   isConnected: boolean;
   participantCount: number;
-  onStartVideoCall: () => void;
+  onStartVideoCall: () => void; // This is still () => void from ChatHeader's perspective
   onLeaveRoom: () => void;
 }
 
@@ -52,7 +54,7 @@ export function ChatHeader({
         <Button
           variant="ghost"
           size="sm"
-          onClick={onStartVideoCall} // Comment removed from this line
+          onClick={() => onStartVideoCall()} // <--- KEY CHANGE HERE: Wrap in an arrow function
           className="text-gray-600 hover:text-blue-600 hover:bg-gray-100"
           disabled={!isConnected}
           title="Start video call"
