@@ -238,7 +238,7 @@ export default function ChatPage() {
             }));
         });
 
-        // --- NEW: Message History Received ---
+        // Message History Received
         const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) => {
             console.log('Received message history:', payload.messages.length, 'messages');
             const historyMessages = payload.messages.map(msg => ({
@@ -250,7 +250,6 @@ export default function ChatPage() {
                 messages: historyMessages // Set messages from history
             }));
         });
-        // --- END NEW ---
 
         // User left room
         const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
@@ -304,4 +303,107 @@ export default function ChatPage() {
         });
 
         // Connection status
-        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number
+        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => { // <--- CORRECTED LINE
+            console.log('Connection status:', data);
+
+            setRoomState(prev => ({
+                ...prev,
+                isConnected: data.connected,
+                participants: prev.participants // Keep current participants, this event is more for general status
+            }));
+        });
+
+        // Error handling
+        const unsubscribeError = socket.on('error', (data: { message: string }) => {
+            console.error('Socket error:', data);
+
+            addNotification('error', 'Error', data.message);
+            setIsConnecting(false);
+        });
+
+        // Cleanup function
+        return () => {
+            unsubscribeRoomJoined();
+            unsubscribeMessageHistory();
+            unsubscribeRoomLeft();
+            unsubscribeMessageReceived();
+            unsubscribeUserTyping();
+            unsubscribeConnectionStatus();
+            unsubscribeError();
+        };
+    }, [socket, roomState.username, roomState.participants, addNotification]);
+
+    /**
+     * Handle connection errors
+     */
+    useEffect(() => {
+        if (socket.connectionError) {
+            addNotification('error', 'Connection Failed', socket.connectionError);
+            setIsConnecting(false);
+        }
+    }, [socket.connectionError, addNotification]);
+
+    // Added console.log for debugging
+    console.log("ChatPage component is rendering!");
+
+    return (
+        <div className="flex h-screen flex-col bg-gray-50">
+            {/* Room Join Modal */}
+            <RoomJoinModal
+                isOpen={isRoomModalOpen}
+                onJoinRoom={handleJoinRoom}
+                isConnecting={isConnecting}
+            />
+
+            {/* Main Chat Interface */}
+            {!isRoomModalOpen && (
+                <>
+                    {/* Chat Header */}
+                    <ChatHeader
+                        roomId={roomState.roomId}
+                        isConnected={roomState.isConnected}
+                        participantCount={roomState.participants.length}
+                        {/* IMPORTANT: Use the new handler here */}
+                        onStartVideoCall={handleStartVideoCall}
+                        onLeaveRoom={handleLeaveRoom}
+                    />
+
+                    {/* Chat Messages */}
+                    <ChatMessages
+                        messages={roomState.messages}
+                        currentUsername={roomState.username}
+                        typingUser={typingUser}
+                    />
+
+                    {/* Message Input */}
+                    <MessageInput
+                        onSendMessage={handleSendMessage}
+                        onTypingStart={handleTypingStart}
+                        onTypingStop={handleTypingStop}
+                        roomId={roomState.roomId}
+                        username={roomState.username}
+                        disabled={!roomState.isConnected}
+                    />
+                </>
+            )}
+
+            {/* Video Call Modal */}
+            <VideoCallModal
+                isOpen={webRTC.callState.isActive}
+                callState={webRTC.callState}
+                localVideoRef={webRTC.localVideoRef}
+                remoteVideoRef={webRTC.remoteVideoRef}
+                onEndCall={webRTC.endCall}
+                onToggleVideo={webRTC.toggleVideo}
+                onToggleAudio={webRTC.toggleAudio}
+                formatCallDuration={webRTC.formatCallDuration}
+            />
+
+            {/* Notifications */}
+            <NotificationToast
+                notifications={notifications}
+                onDismiss={dismissNotification}
+            />
+        </div>
+    );
+}
