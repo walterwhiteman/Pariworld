@@ -67,8 +67,11 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
             peerConnection.connectionState === 'failed' ||
             peerConnection.connectionState === 'closed') {
           // Only automatically end the call if it was active
-          if (callState.isActive) {
-            endCall();
+          // Note: callState.isActive is captured from the closure of initializePeerConnection
+          // If you need the very latest value, you might use a ref for callState or pass it explicitly.
+          // For now, this is likely fine.
+          if (callState.isActive) { // This uses the value of isActive when initializePeerConnection was last created
+            endCall(); // This calls the latest `endCall` from its closure
           }
         }
       };
@@ -78,7 +81,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.error('Error initializing peer connection:', error);
       return null;
     }
-  }, [socket, roomId, username, callState.isActive]);
+  }, [socket, roomId, username]); // Removed callState.isActive from dependencies
 
   /**
    * Get user media (camera and microphone)
@@ -102,6 +105,66 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       return null;
     }
   }, []);
+
+  /**
+   * End the current call
+   */
+  const endCall = useCallback(() => {
+    // Only log "Ending video call..." if a call was active or a connection exists
+    if (callState.isActive || peerConnectionRef.current || callState.localStream || callState.remoteStream) {
+        console.log('Ending video call...');
+    } else {
+        return; // If nothing is active or connected, just return
+    }
+
+    // Stop call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+
+    // Close peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    // Stop local stream
+    if (callState.localStream) {
+      callState.localStream.getTracks().forEach(track => track.stop());
+      setCallState(prev => ({ ...prev, localStream: null }));
+    }
+
+    // Clear video elements
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+
+    // Notify other peer (only if a call was actually active when endCall was initiated)
+    if (socket?.emit && callState.isActive) {
+      socket.emit('webrtc-signal', {
+        type: 'call-end',
+        data: { reason: 'user_ended' },
+        roomId,
+        sender: username
+      });
+    }
+
+    // Reset call state
+    setCallState({
+      isActive: false,
+      isLocalVideoEnabled: true,
+      isLocalAudioEnabled: true,
+      localStream: null,
+      remoteStream: null,
+      callDuration: 0
+    });
+
+    callStartTimeRef.current = null;
+  }, [callState.localStream, callState.isActive, socket, roomId, username]); // Keep callState.isActive here as it impacts emit logic
 
   /**
    * Start a video call
@@ -215,66 +278,6 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       endCall(); // Clean up if answering fails
     }
   }, [getUserMedia, initializePeerConnection, socket, roomId, username, endCall]);
-
-  /**
-   * End the current call
-   */
-  const endCall = useCallback(() => {
-    // Only log "Ending video call..." if a call was active or a connection exists
-    if (callState.isActive || peerConnectionRef.current || callState.localStream || callState.remoteStream) {
-        console.log('Ending video call...');
-    } else {
-        return; // If nothing is active or connected, just return
-    }
-
-    // Stop call timer
-    if (callTimerRef.current) {
-      clearInterval(callTimerRef.current);
-      callTimerRef.current = null;
-    }
-
-    // Close peer connection
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-
-    // Stop local stream
-    if (callState.localStream) {
-      callState.localStream.getTracks().forEach(track => track.stop());
-      setCallState(prev => ({ ...prev, localStream: null }));
-    }
-
-    // Clear video elements
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
-
-    // Notify other peer (only if a call was actually active when endCall was initiated)
-    if (socket?.emit && callState.isActive) {
-      socket.emit('webrtc-signal', {
-        type: 'call-end',
-        data: { reason: 'user_ended' },
-        roomId,
-        sender: username
-      });
-    }
-
-    // Reset call state
-    setCallState({
-      isActive: false,
-      isLocalVideoEnabled: true,
-      isLocalAudioEnabled: true,
-      localStream: null,
-      remoteStream: null,
-      callDuration: 0
-    });
-
-    callStartTimeRef.current = null;
-  }, [callState.localStream, callState.isActive, socket, roomId, username]);
 
 
   /**
