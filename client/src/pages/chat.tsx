@@ -303,7 +303,7 @@ export default function ChatPage() {
         });
 
         // Connection status
-        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => { // <--- CORRECTED LINE
+        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
             console.log('Connection status:', data);
 
             setRoomState(prev => ({
@@ -359,11 +359,12 @@ export default function ChatPage() {
             {!isRoomModalOpen && (
                 <>
                     {/* Chat Header */}
+                    {/* IMPORTANT: The onStartVideoCall handler is set here to initiate a 1-on-1 call for testing. */}
+                    {/* Remember to replace 'OTHER_USER_USERNAME_HERE' in handleStartVideoCall with a real username. */}
                     <ChatHeader
                         roomId={roomState.roomId}
                         isConnected={roomState.isConnected}
                         participantCount={roomState.participants.length}
-                        {/* IMPORTANT: Use the new handler here */}
                         onStartVideoCall={handleStartVideoCall}
                         onLeaveRoom={handleLeaveRoom}
                     />
