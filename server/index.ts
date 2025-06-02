@@ -1,30 +1,24 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes"; // This likely imports your Express API routes
+import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
-// --- NEW IMPORT FOR SOCKET.IO SERVER ---
 import { Server as SocketIOServer } from 'socket.io'; // Import Socket.IO Server
-// --- END NEW IMPORT ---
 
-// --- NEW IMPORT FOR DATABASE CONNECTION ---
 import pkg from 'pg';
 const { Pool } = pkg;
-// --- END NEW IMPORT ---
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// --- EXISTING CORS CONFIGURATION BLOCK ---
+// --- EXISTING CORS CONFIGURATION BLOCK (KEEP THIS ONE!) ---
 app.use(cors({
   origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: REPLACE WITH YOUR ACTUAL RENDER FRONTEND URL
-  methods: ["GET", "POST", "PUT", "DELETE"], // Allow common HTTP methods
-  credentials: true // Allow cookies and authorization headers if your app uses them
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
 }));
 // --- END CORS CONFIGURATION BLOCK ---
 
-// --- NEW: DATABASE POOL & API KEY SETUP ---
-// Ensure DATABASE_URL and CLEANUP_API_KEY are set as environment variables on Render!
 const connectionString = process.env.DATABASE_URL;
 const CLEANUP_API_KEY = process.env.CLEANUP_API_KEY;
 
@@ -38,13 +32,10 @@ if (!CLEANUP_API_KEY) {
 const pool = new Pool({
     connectionString: connectionString,
     ssl: {
-        rejectUnauthorized: false // Required for Neon if not using specific CA certs
+        rejectUnauthorized: false
     }
 });
-// --- END NEW: DATABASE POOL & API KEY SETUP ---
 
-
-// --- NEW: AUTHENTICATION MIDDLEWARE (THE "SECRET KEY" CHECKER) ---
 function authenticateCleanup(req: Request, res: Response, next: NextFunction) {
     const providedKey = req.headers['x-cleanup-api-key'] || req.query.key;
 
@@ -54,10 +45,7 @@ function authenticateCleanup(req: Request, res: Response, next: NextFunction) {
     }
     next();
 }
-// --- END NEW: AUTHENTICATION MIDDLEWARE ---
 
-
-// --- EXISTING LOGGING MIDDLEWARE ---
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -87,24 +75,18 @@ app.use((req, res, next) => {
 
   next();
 });
-// --- END EXISTING LOGGING MIDDLEWARE ---
 
 
 (async () => {
-  const server = await registerRoutes(app); // Your existing route registration, this `server` is likely your http.Server instance.
+  const server = await registerRoutes(app);
 
-    // --- NEW: Initialize Socket.IO Server ---
-    // This attaches Socket.IO to the *same* HTTP server instance that Express uses.
-    const io = new SocketIOServer(server, { // Attach Socket.IO to the 'server' returned by registerRoutes
-        path: '/ws', // This MUST match the frontend's `path` option in useSocket.ts
-        cors: {
-            origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: Match your frontend Render URL
-            methods: ["GET", "POST"]
-        }
+    // --- MODIFIED: Initialize Socket.IO Server - REMOVED CORS OPTIONS ---
+    const io = new SocketIOServer(server, {
+        path: '/ws', // Keep this, it's crucial for the client connection
+        // REMOVED: cors: { origin: "https://pariworld.onrender.com", methods: ["GET", "POST"] }
     });
 
-    // --- NEW: Basic Socket.IO Connection Handler ---
-    // This is where you will define all your real-time event logic (join-room, send-message, etc.)
+    // --- EXISTING: Basic Socket.IO Connection Handler ---
     io.on('connection', (socket) => {
         console.log(`Socket connected: ${socket.id}`);
 
@@ -112,36 +94,13 @@ app.use((req, res, next) => {
             console.log(`Socket disconnected: ${socket.id}, Reason: ${reason}`);
         });
 
-        // ====================================================================
         // IMPORTANT: ADD YOUR CHAT-SPECIFIC SOCKET.IO EVENT LISTENERS HERE!
-        // These are the events your frontend emits (e.g., 'join-room', 'send-message').
-        // You will need to implement the logic for each of these:
-        // ====================================================================
-
-        // Example:
-        // socket.on('join-room', (payload: { roomId: string; username: string }) => {
-        //     console.log(`${payload.username} joining room ${payload.roomId}`);
-        //     socket.join(payload.roomId);
-        //     // Optionally, broadcast to others that a user joined, send participant list etc.
-        //     // io.to(payload.roomId).emit('user-joined-notification', { username: payload.username });
-        //     // Also send initial state to the joining user:
-        //     // const participants = Array.from(io.sockets.adapter.rooms.get(payload.roomId) || []).map(id => io.sockets.sockets.get(id)?.data.username);
-        //     // socket.emit('room-joined', { roomId: payload.roomId, participants: participants });
-        // });
-
-        // socket.on('send-message', (message: { roomId: string; sender: string; content: string }) => {
-        //     console.log(`Message from ${message.sender} in room ${message.roomId}: ${message.content}`);
-        //     // Save message to DB (using your 'pool' from above)
-        //     // Broadcast message to all in the room
-        //     // io.to(message.roomId).emit('message-received', { ...message, id: 'some-db-id', timestamp: new Date().toISOString() });
-        // });
-
-        // ... and so on for 'leave-room', 'typing-start', 'typing-stop', etc.
+        // ... (your existing socket.on event listeners) ...
     });
-    // --- END NEW SOCKET.IO SETUP ---
+    // --- END SOCKET.IO SETUP ---
 
 
-  // --- NEW: API ENDPOINT FOR MESSAGE CLEANUP ---
+  // --- EXISTING: API ENDPOINT FOR MESSAGE CLEANUP ---
   app.post('/api/cleanup-messages', authenticateCleanup, async (req: Request, res: Response) => {
       console.log(`[${new Date().toISOString()}] External cleanup trigger received.`);
       try {
@@ -156,7 +115,6 @@ app.use((req, res, next) => {
           res.status(500).send('Error during cleanup operation.');
       }
   });
-  // --- END NEW: API ENDPOINT ---
 
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -168,14 +126,12 @@ app.use((req, res, next) => {
   });
 
   if (app.get("env") === "development") {
-    await setupVite(app, server); // 'server' here is the http.Server instance
+    await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
   const port = 5000;
-  // The 'server' variable already holds the http.Server instance returned by registerRoutes,
-  // and Socket.IO is attached to it. So, just use 'server.listen' as before.
   server.listen({
     port,
     host: "0.0.0.0",
