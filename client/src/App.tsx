@@ -3,11 +3,14 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatPage from "@/pages/chat";
+// Ensure this import correctly points to the renamed file.
+// If you're using path aliases, it might not explicitly show .tsx,
+// but the underlying file MUST be .tsx
 import { SocketProvider } from '@/hooks/useSocket';
-import React from 'react'; // ADDED: Import React for React.memo
+import React from 'react';
 
 function AppContent() {
-  console.log('[App.tsx Render] AppContent component rendering...'); // Log every render of the inner component
+  console.log('[App.tsx Render] AppContent component rendering...');
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -21,7 +24,6 @@ function AppContent() {
   );
 }
 
-// MODIFIED: Export a memoized version of the App component
 const App = React.memo(AppContent);
 
 export default App;
