@@ -59,10 +59,15 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
     const io = new SocketIOServer(httpServer, {
         path: '/ws', // Matches the path your frontend expects
         cors: {
-            origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: ENSURE THIS MATCHES YOUR FRONTEND URL
-            methods: ["GET", "POST"]
-        }
+            origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: ENSURE THIS MATCHES YOUR FRONTEND URL EXACTLY
+            methods: ["GET", "POST"],
+            credentials: true // Important for cookie/session based auth if used, good to have for general CORS
+        },
+        // Add transports explicitly, though usually not needed if default is websocket
+        transports: ['websocket', 'polling']
     });
+
+    console.log('[Backend Socket.IO] Socket.IO server instance created.');
 
     // Helper functions (now using Socket.IO methods)
     const getRoomParticipantCount = (roomId: string): number => {
@@ -92,16 +97,18 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
 
     // --- Socket.IO Connection Handling ---
     io.on('connection', (socket) => {
-        console.log('New Socket.IO connection established:', socket.id);
+        console.log(`[Backend Socket.IO] New Socket.IO connection established: ${socket.id} from ${socket.handshake.address}`);
 
         // Initial connection confirmation (optional, but good for debugging)
         socket.emit('connection-established', { connected: true });
 
         socket.on('join-room', async (payload: { roomId: string, username: string }) => {
             const { roomId, username } = payload;
+            console.log(`[Backend Socket.IO] Received join-room from ${username} for room ${roomId}`);
 
             if (!roomId || !username) {
                 socket.emit('error', { message: 'Room ID and username are required' });
+                console.warn(`[Backend Socket.IO] Join room failed: Room ID or username missing for socket ${socket.id}`);
                 return;
             }
 
@@ -114,20 +121,20 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
 
             // Update the username to socket.id map
             usernameToSocketIdMap.set(username, socket.id);
-            console.log(`User ${username} (Socket ID: ${socket.id}) joined room ${roomId}`);
+            console.log(`[Backend Socket.IO] User ${username} (Socket ID: ${socket.id}) joined room ${roomId}`);
 
             try {
                 // Add participant to persistent storage (if not already there and active)
                 await storage.addRoomParticipant(roomId, username);
             } catch (error) {
-                console.error('Error storing room participant:', error);
+                console.error('[Backend Socket.IO] Error storing room participant:', error);
             }
 
             try {
                 // Fetch and send message history
                 const previousMessages = await storage.getMessages(roomId, 50);
                 if (previousMessages.length > 0) {
-                    console.log(`Sending ${previousMessages.length} historical messages to ${username} in ${roomId}`);
+                    console.log(`[Backend Socket.IO] Sending ${previousMessages.length} historical messages to ${username} in ${roomId}`);
                     socket.emit('message-history', {
                         roomId,
                         messages: previousMessages.map(msg => ({
@@ -137,7 +144,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                     });
                 }
             } catch (error) {
-                console.error('Error fetching previous messages:', error);
+                console.error('[Backend Socket.IO] Error fetching previous messages:', error);
             }
 
             // Emit 'room-joined' to the joining client with current participants
@@ -147,7 +154,6 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
             });
 
             // Broadcast to everyone in the room (including sender) that a new participant joined
-            // This replaces the 'connection-status' and system message for clarity
             io.to(roomId).emit('participant-joined', {
                 username: username,
                 roomId: roomId,
@@ -163,10 +169,12 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                 messageType: 'system',
                 timestamp: new Date().toISOString()
             });
+            console.log(`[Backend Socket.IO] User ${username} successfully processed join for room ${roomId}`);
         });
 
         socket.on('leave-room', async (payload: { roomId: string, username: string }) => {
             const { roomId, username } = payload;
+            console.log(`[Backend Socket.IO] Received leave-room from ${username} for room ${roomId}`);
 
             // Only process if the socket ID matches the one in our map for this username
             if (usernameToSocketIdMap.get(username) === socket.id) {
@@ -177,7 +185,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                     // Mark participant as inactive in persistent storage
                     await storage.removeRoomParticipant(roomId, username);
                 } catch (error) {
-                    console.error('Error removing room participant:', error);
+                    console.error('[Backend Socket.IO] Error removing room participant:', error);
                 }
 
                 // Broadcast to everyone in the room that a participant left
@@ -190,22 +198,23 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                 // Send system message to the room
                 io.to(roomId).emit('message-received', {
                     id: generateMessageId(),
-                    roomId,
+                    roomId: roomId,
                     sender: 'System',
                     content: `${username} left the chat`,
                     messageType: 'system',
                     timestamp: new Date().toISOString()
                 });
-                console.log(`User ${username} left room ${roomId}`);
+                console.log(`[Backend Socket.IO] User ${username} left room ${roomId}`);
             }
         });
 
         socket.on('send-message', async (messageData: { content?: string, imageData?: string, messageType?: 'text' | 'image' | 'system' }) => {
-            console.log(`[Backend] Received send-message from ${socket.data.username} in room ${socket.data.roomId}`);
+            console.log(`[Backend Socket.IO] Received send-message from ${socket.data.username} in room ${socket.data.roomId}`);
             const { roomId, username } = socket.data;
 
             if (!roomId || !username) {
                 socket.emit('error', { message: 'Must join a room first' });
+                console.warn(`[Backend Socket.IO] Send message failed: User not in room for socket ${socket.id}`);
                 return;
             }
 
@@ -221,7 +230,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                 // Store message in database
                 await storage.addMessage(completeMessage);
             } catch (error) {
-                console.error('Error storing message:', error);
+                console.error('[Backend Socket.IO] Error storing message:', error);
             }
 
             // Broadcast message to all clients in the room
@@ -235,17 +244,19 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                 timestamp: new Date().toISOString()
             });
 
-            console.log(`[Backend] Message broadcasted in room ${roomId} by ${username}`);
+            console.log(`[Backend Socket.IO] Message broadcasted in room ${roomId} by ${username}`);
         });
 
         socket.on('typing-start', (payload: { roomId: string, username: string }) => {
             const { roomId, username } = payload;
+            console.log(`[Backend Socket.IO] ${username} started typing in room ${roomId}`);
             // Broadcast to everyone in the room EXCEPT the sender
             socket.to(roomId).emit('typing-status', { username, isTyping: true });
         });
 
         socket.on('typing-stop', (payload: { roomId: string, username: string }) => {
             const { roomId, username } = payload;
+            console.log(`[Backend Socket.IO] ${username} stopped typing in room ${roomId}`);
             // Broadcast to everyone in the room EXCEPT the sender
             socket.to(roomId).emit('typing-status', { username, isTyping: false });
         });
@@ -253,6 +264,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
         // --- WebRTC Signaling ---
         socket.on('webrtc-signal', (payload: { roomId: string, sender: string, recipient: string, type: string, data: any }) => {
             const { roomId, sender, recipient, type, data } = payload;
+            console.log(`[Backend Socket.IO] Received WebRTC signal type '${type}' from '${sender}' for '${recipient}' in room ${roomId}`);
 
             const recipientSocketId = usernameToSocketIdMap.get(recipient);
 
@@ -265,18 +277,18 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                     type,
                     data
                 });
-                console.log(`Forwarded WebRTC signal type '${type}' from '${sender}' to '${recipient}' (Socket ID: ${recipientSocketId}) in room ${roomId}`);
+                console.log(`[Backend Socket.IO] Forwarded WebRTC signal type '${type}' from '${sender}' to '${recipient}' (Socket ID: ${recipientSocketId}) in room ${roomId}`);
             } else if (recipientSocketId === socket.id) {
-                console.warn(`Attempted to send WebRTC signal to self from ${sender}. Ignoring.`);
+                console.warn(`[Backend Socket.IO] Attempted to send WebRTC signal to self from ${sender}. Ignoring.`);
             } else {
-                console.warn(`Recipient '${recipient}' not found or not online for WebRTC signal from ${sender}.`);
+                console.warn(`[Backend Socket.IO] Recipient '${recipient}' not found or not online for WebRTC signal from ${sender}.`);
                 socket.emit('error', { message: `Recipient '${recipient}' is not online or available.` });
             }
         });
         // --- END WebRTC Signaling ---
 
-        socket.on('disconnect', async () => {
-            console.log('Socket.IO connection closed:', socket.id);
+        socket.on('disconnect', async (reason) => {
+            console.log(`[Backend Socket.IO] Socket.IO connection closed: ${socket.id}. Reason: ${reason}`);
 
             const disconnectedUsername = socket.data.username;
             const disconnectedRoomId = socket.data.roomId;
@@ -284,14 +296,16 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
             // Remove from map if present and matches socket ID
             if (disconnectedUsername && usernameToSocketIdMap.get(disconnectedUsername) === socket.id) {
                 usernameToSocketIdMap.delete(disconnectedUsername);
+                console.log(`[Backend Socket.IO] Removed ${disconnectedUsername} from usernameToSocketIdMap.`);
             }
 
             if (disconnectedRoomId && disconnectedUsername) {
                 try {
                     // Mark participant as inactive in persistent storage
                     await storage.removeRoomParticipant(disconnectedRoomId, disconnectedUsername);
+                    console.log(`[Backend Socket.IO] Marked ${disconnectedUsername} as inactive in DB for room ${disconnectedRoomId}.`);
                 } catch (error) {
-                    console.error('Error removing room participant on disconnect:', error);
+                    console.error('[Backend Socket.IO] Error removing room participant on disconnect:', error);
                 }
 
                 // Broadcast to everyone in the room that a participant left
@@ -310,12 +324,12 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                     messageType: 'system',
                     timestamp: new Date().toISOString()
                 });
-                console.log(`User ${disconnectedUsername} disconnected from room ${disconnectedRoomId}`);
+                console.log(`[Backend Socket.IO] User ${disconnectedUsername} disconnected from room ${disconnectedRoomId}. Broadcasted leave event.`);
             }
         });
     });
 
-    console.log('Socket.IO server initialized on /ws path');
+    console.log('[Backend Socket.IO] Socket.IO server initialized and listening for connections.');
 
     // --- Message Cleanup Cron Job (Moved from index.ts to here for clarity) ---
     // This runs every hour to delete messages older than 24 hours
@@ -333,7 +347,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
     // Clear the interval when the HTTP server closes
     httpServer.on('close', () => {
         clearInterval(cleanupInterval);
-        console.log('Message cleanup interval cleared.');
+        console.log('[Backend Socket.IO] Message cleanup interval cleared on HTTP server close.');
     });
     // --- END Message Cleanup Cron Job ---
 
