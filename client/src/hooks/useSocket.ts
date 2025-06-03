@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import io, { Socket } from 'socket.io-client'; // <--- NEW: Import io and Socket type
+import io, { Socket } from 'socket.io-client';
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
 /**
@@ -9,44 +9,32 @@ import { ChatMessage, SocketEvents } from '@/types/chat';
 export function useSocket() {
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
-    const socketRef = useRef<Socket | null>(null); // <--- NEW: Use Socket type
+    const socketRef = useRef<Socket | null>(null);
 
     // Define your backend Socket.IO URL here
-    // This should be your backend's Render service URL
-    // IMPORTANT: The path should match what you configured in your backend's routes.ts for Socket.IO
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
-    // Use a ref for on and emit callbacks to prevent stale closures and improve performance
-    const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map()); // Use for managing handlers
+    const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map());
 
-    /**
-     * Emit an event to the server
-     */
     const emit = useCallback((eventName: string, payload: any) => {
         if (socketRef.current && socketRef.current.connected) {
             socketRef.current.emit(eventName, payload);
-            console.log(`Emitted event: ${eventName}`, payload);
+            console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
-            console.warn(`Cannot emit event '${eventName}' - Socket.IO is not connected.`);
+            console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected.`);
         }
-    }, []); // No dependencies here means it's stable
+    }, []);
 
-    /**
-     * Register an event handler
-     */
     const on = useCallback((eventName: string, handler: Function) => {
-        // Add handler to our local ref for management
         if (!eventHandlersRef.current.has(eventName)) {
             eventHandlersRef.current.set(eventName, new Set());
         }
         eventHandlersRef.current.get(eventName)!.add(handler);
 
-        // If socket already exists, attach the handler
         if (socketRef.current) {
             socketRef.current.on(eventName, handler);
         }
 
-        // Return cleanup function to remove the handler
         return () => {
             const handlers = eventHandlersRef.current.get(eventName);
             if (handlers) {
@@ -55,34 +43,27 @@ export function useSocket() {
                     eventHandlersRef.current.delete(eventName);
                 }
             }
-            // Also remove from actual socket if it exists
             if (socketRef.current) {
                 socketRef.current.off(eventName, handler);
             }
         };
-    }, []); // No dependencies here means it's stable
+    }, []);
 
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
-        // Only connect if socket not already initialized
         if (!socketRef.current) {
-            console.log('Attempting to connect to Socket.IO:', BACKEND_URL);
+            console.log('[useSocket] Attempting to connect to Socket.IO:', BACKEND_URL);
             const socketInstance = io(BACKEND_URL, {
-                // The path here MUST match the path you set for Socket.IO in your backend's routes.ts
-                // In your backend's routes.ts, you have `server.use(socketIoInstance);` after `const socketIoInstance = new SocketIOServer(...)`
-                // The `path` option for the SocketIOServer is what matters here.
-                // Based on your backend, you set `path: '/ws'`.
-                path: '/ws', // <--- IMPORTANT: This MUST match your backend's Socket.IO path
-                transports: ['websocket', 'polling'], // Prioritize websocket
-                withCredentials: true // Important for CORS headers
+                path: '/ws',
+                transports: ['websocket', 'polling'],
+                withCredentials: true
             });
             socketRef.current = socketInstance;
 
             socketInstance.on('connect', () => {
-                console.log('Socket.IO connected successfully!');
+                console.log('[useSocket] Socket.IO connected successfully! (Frontend)');
                 setIsConnected(true);
                 setConnectionError(null);
-                // Re-attach any handlers that were registered via `on` before connection
                 eventHandlersRef.current.forEach((handlers, eventName) => {
                     handlers.forEach(handler => {
                         socketInstance.on(eventName, handler);
@@ -91,43 +72,58 @@ export function useSocket() {
             });
 
             socketInstance.on('disconnect', (reason) => {
-                console.log('Socket.IO disconnected:', reason);
+                console.log('[useSocket] Socket.IO disconnected! (Frontend):', reason);
                 setIsConnected(false);
                 if (reason === 'io server disconnect') {
-                    // The disconnection was initiated by the server, try to reconnect manually
                     setConnectionError('Disconnected by server. Attempting to reconnect...');
-                    socketInstance.connect(); // Attempt to reconnect
+                    socketInstance.connect();
                 } else {
                     setConnectionError(`Disconnected: ${reason}`);
                 }
             });
 
             socketInstance.on('connect_error', (error) => {
-                console.error('Socket.IO connection error:', error.message, error.stack);
+                console.error('[useSocket] Socket.IO connection error! (Frontend):', error.message, error.stack);
                 setConnectionError(`Connection failed: ${error.message}`);
                 setIsConnected(false);
             });
+
+            socketInstance.on('reconnect_attempt', (attemptNumber) => {
+                console.log(`[useSocket] Reconnect attempt #${attemptNumber}`);
+            });
+
+            socketInstance.on('reconnect', (attemptNumber) => {
+                console.log(`[useSocket] Reconnected successfully after ${attemptNumber} attempts`);
+                setIsConnected(true);
+                setConnectionError(null);
+            });
+
+            socketInstance.on('reconnect_error', (error) => {
+                console.error('[useSocket] Reconnect error:', error.message);
+                setConnectionError(`Reconnect failed: ${error.message}`);
+            });
+
+            socketInstance.on('reconnect_failed', () => {
+                console.error('[useSocket] Reconnect failed permanently.');
+                setConnectionError('Reconnect failed permanently. Please refresh.');
+            });
         }
 
-        // Cleanup function for when component unmounts or hook dependencies change
         return () => {
             if (socketRef.current) {
-                console.log('Disconnecting Socket.IO on unmount.');
-                // Remove all listeners to prevent memory leaks
+                console.log('[useSocket] Disconnecting Socket.IO on unmount.');
                 socketRef.current.offAny();
                 socketRef.current.disconnect();
                 socketRef.current = null;
             }
         };
-    }, [BACKEND_URL]); // Depend on BACKEND_URL to re-initialize if it changes
+    }, [BACKEND_URL]);
 
-    // Public API for the hook
     return {
         isConnected,
         connectionError,
         emit,
         on,
-        // These functions are just wrappers around emit for convenience and type safety
         joinRoom: useCallback((roomId: string, username: string) => {
             emit(SocketEvents.JoinRoom, { roomId, username });
         }, [emit]),
