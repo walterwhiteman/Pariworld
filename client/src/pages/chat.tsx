@@ -30,7 +30,9 @@ export default function ChatPage() {
     const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
     // Hooks
-    const socket = useSocket();
+    // MODIFIED: Destructure socket instance directly from useSocket
+    const { socket, isConnected: socketIsConnected, connectionError } = useSocket();
+    // Pass the raw socket instance to useWebRTC
     const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
 
     /**
@@ -72,7 +74,8 @@ export default function ChatPage() {
      * Join a chat room
      */
     const handleJoinRoom = useCallback((roomId: string, username: string) => {
-        if (!socket.isConnected) {
+        // MODIFIED: Check socketIsConnected from useSocket hook and ensure socket exists
+        if (!socketIsConnected || !socket) {
             addNotification('error', 'Connection Error', 'Unable to connect to chat server');
             return;
         }
@@ -89,16 +92,17 @@ export default function ChatPage() {
             participants: []
         }));
 
-        // Join room via socket
-        socket.joinRoom(roomId, username);
-    }, [socket, addNotification]);
+        // MODIFIED: Join room via socket.emit directly
+        socket.emit('join-room', { roomId, username });
+    }, [socket, socketIsConnected, addNotification]); // Added socket and socketIsConnected to dependencies
 
     /**
      * Leave the current room
      */
     const handleLeaveRoom = useCallback(() => {
-        if (roomState.roomId && roomState.username) {
-            socket.leaveRoom(roomState.roomId, roomState.username);
+        // MODIFIED: Check if socket instance exists before emitting
+        if (roomState.roomId && roomState.username && socket) {
+            socket.emit('leave-room', { roomId: roomState.roomId, username: roomState.username });
         }
 
         // End video call if active
@@ -120,46 +124,47 @@ export default function ChatPage() {
         setTypingUser(undefined);
 
         addNotification('info', 'Left Room', 'You have left the chat room');
-    }, [roomState, socket, webRTC, addNotification]);
+    }, [roomState, socket, webRTC, addNotification]); // Added socket to dependencies
 
     /**
      * Send a message
      */
     const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-        if (!roomState.isConnected) {
+        // MODIFIED: Check if socket instance exists before emitting
+        if (!roomState.isConnected || !socket) {
             addNotification('error', 'Connection Error', 'Not connected to chat room');
             return;
         }
 
-        // --- FIX FOR DOUBLE MESSAGES: ONLY EMIT, DO NOT ADD TO LOCAL STATE HERE ---
-        // The message will be added to the state when the 'message-received' event
-        // comes back from the server (for all clients, including the sender).
-        socket.sendMessage({
+        // MODIFIED: Send message via socket.emit directly
+        socket.emit('send-message', {
             roomId: message.roomId,
             sender: message.sender,
             content: message.content,
             imageData: message.imageData,
             messageType: message.messageType
         });
-    }, [roomState.isConnected, socket, addNotification]);
+    }, [roomState.isConnected, socket, addNotification]); // Added socket to dependencies
 
     /**
      * Handle typing start
      */
     const handleTypingStart = useCallback(() => {
-        if (roomState.isConnected) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, true);
+        // MODIFIED: Check if socket instance exists before emitting
+        if (roomState.isConnected && socket) {
+            socket.emit('typing-start', { roomId: roomState.roomId, username: roomState.username });
         }
-    }, [roomState, socket]);
+    }, [roomState, socket]); // Added socket to dependencies
 
     /**
      * Handle typing stop
      */
     const handleTypingStop = useCallback(() => {
-        if (roomState.isConnected) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, false);
+        // MODIFIED: Check if socket instance exists before emitting
+        if (roomState.isConnected && socket) {
+            socket.emit('typing-stop', { roomId: roomState.roomId, username: roomState.username });
         }
-    }, [roomState, socket]);
+    }, [roomState, socket]); // Added socket to dependencies
 
     // --- REVISED: handleStartVideoCall function for 1-on-1 testing ---
     const handleStartVideoCall = useCallback(() => {
@@ -195,9 +200,9 @@ export default function ChatPage() {
      * Set up socket event listeners
      */
     useEffect(() => {
-        // --- MODIFIED: Only set up listeners if the socket is connected ---
-        if (!socket.isConnected) {
-            console.log('[ChatPage] Socket not connected, deferring listener setup.');
+        // MODIFIED: Only set up listeners if socket instance exists AND is connected
+        if (!socket || !socketIsConnected) {
+            console.log('[ChatPage] Socket not available or not connected, deferring listener setup.');
             return;
         }
 
@@ -294,15 +299,18 @@ export default function ChatPage() {
         // Cleanup function: unsubscribe from all socket events when component unmounts
         return () => {
             console.log('[ChatPage] Cleaning up socket listeners.');
-            unsubscribeRoomJoined();
-            unsubscribeMessageReceived();
-            unsubscribeParticipantJoined();
-            unsubscribeParticipantLeft();
-            unsubscribeTypingStatus();
-            unsubscribeRoomHistory();
-            unsubscribeError();
+            // Ensure socket exists before calling off
+            if (socket) {
+                unsubscribeRoomJoined();
+                unsubscribeMessageReceived();
+                unsubscribeParticipantJoined();
+                unsubscribeParticipantLeft();
+                unsubscribeTypingStatus();
+                unsubscribeRoomHistory();
+                unsubscribeError();
+            }
         };
-    }, [socket, roomState.username, addNotification]); // Dependencies for useEffect
+    }, [socket, socketIsConnected, roomState.username, addNotification]); // Added socket and socketIsConnected to dependencies
 
     // Rendered UI
     return (
