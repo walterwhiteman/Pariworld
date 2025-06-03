@@ -44,9 +44,12 @@ export function useSocket() {
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
         // If socket is already a Socket instance, don't re-initialize
-        if (socket) return;
+        if (socket) {
+            console.log('[useSocket useEffect] Socket already initialized, skipping re-init.');
+            return;
+        }
 
-        console.log('[useSocket] Attempting to connect to Socket.IO:', BACKEND_URL);
+        console.log('[useSocket useEffect] Attempting to connect to Socket.IO:', BACKEND_URL);
         const socketInstance = io(BACKEND_URL, {
             path: '/ws',
             transports: ['websocket', 'polling'],
@@ -59,6 +62,7 @@ export function useSocket() {
             setSocket(socketInstance); // MODIFIED: Set socket state ONLY on successful connection
             setIsConnected(true);
             setConnectionError(null);
+            console.log('[useSocket] Socket state set to connected instance.');
         });
 
         socketInstance.on('disconnect', (reason) => {
@@ -106,7 +110,7 @@ export function useSocket() {
         // Cleanup function for the useEffect: disconnects the socket when the component using useSocket unmounts
         return () => {
             if (socketInstance) { // Use socketInstance from this closure
-                console.log('[useSocket] Disconnecting Socket.IO on component unmount.');
+                console.log('[useSocket useEffect] Disconnecting Socket.IO on component unmount.');
                 socketInstance.offAny(); // Remove all listeners from this specific instance
                 socketInstance.disconnect();
                 setSocket(undefined); // Clear the socket instance from state
