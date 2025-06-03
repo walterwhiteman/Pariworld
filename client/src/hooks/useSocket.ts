@@ -15,19 +15,18 @@ export function useSocket() {
     // Define your backend Socket.IO URL here
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
-    // Emit function: always checks if socket is connected
-    const emit = useCallback((eventName: string, payload: any) => {
+    // MODIFIED: Removed useCallback from emit to ensure it always uses the latest 'socket'
+    const emit = (eventName: string, payload: any) => {
         if (socket && socket.connected) { // Check the state variable 'socket'
             socket.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
             console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected.`);
         }
-    }, [socket]); // Dependency on 'socket' state
+    };
 
-    // On function: directly attaches handler to the current socket instance.
-    // This 'on' function is used by ChatPage's useEffect to set up listeners.
-    const on = useCallback((eventName: string, handler: Function) => {
+    // MODIFIED: Removed useCallback from on to ensure it always uses the latest 'socket'
+    const on = (eventName: string, handler: Function) => {
         if (socket) { // Check the state variable 'socket'
             socket.on(eventName, handler);
         } else {
@@ -40,7 +39,7 @@ export function useSocket() {
                 socket.off(eventName, handler);
             }
         };
-    }, [socket]); // Dependency on 'socket' state
+    };
 
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
