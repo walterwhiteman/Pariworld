@@ -130,18 +130,6 @@ export default function ChatPage() {
             return;
         }
 
-        // OLD LOGIC (Optimistic update that caused duplicates due to ID mismatch from server):
-        // const tempMessage: ChatMessage = {
-        //     ...message,
-        //     id: generateClientMessageId(), // Client-side ID
-        //     timestamp: new Date(),
-        //     isSelf: true
-        // } as ChatMessage;
-        // setRoomState(prev => ({
-        //     ...prev,
-        //     messages: [...prev.messages, tempMessage]
-        // }));
-
         // NEW LOGIC (Simpler: Rely only on 'message-received' event from server to add message)
         socket.sendMessage({
             roomId: message.roomId,
@@ -182,19 +170,21 @@ export default function ChatPage() {
         // for this to work. This is a temporary hardcode for testing.
         const userToCall = 'Chandra'; // <--- REPLACE THIS!
 
+        // console.log('Current room participants:', roomState.participants); // Moved to UI for debugging
+        // console.log('Attempting to call user:', userToCall); // Moved to UI for debugging
+
         if (!userToCall || userToCall === roomState.username) {
             addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
             return;
         }
 
-        // Check if the user to call is actually in the room's participant list
         if (!roomState.participants.includes(userToCall)) {
              addNotification('warning', 'Call Info', `${userToCall} is not currently in this room.`);
              return;
         }
 
         webRTC.startCall(userToCall);
-        console.log(`Attempting to call: ${userToCall}`);
+        console.log(`Attempting to call: ${userToCall}`); // Keep this for general log
         addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
 
     }, [roomState, webRTC, addNotification]);
@@ -357,6 +347,17 @@ export default function ChatPage() {
             {/* Main Chat Interface */}
             {!isRoomModalOpen && (
                 <>
+                    {/* Temporary Debugging Display */}
+                    <div className="p-2 bg-yellow-100 text-yellow-800 text-xs font-mono">
+                        **DEBUG INFO (REMOVE LATER):**<br/>
+                        Current User: {roomState.username}<br/>
+                        Room ID: {roomState.roomId}<br/>
+                        Connected: {roomState.isConnected ? 'Yes' : 'No'}<br/>
+                        Participants: [{roomState.participants.join(', ')}]<br/>
+                        Calling Target: OTHER_USER_USERNAME_HERE (replace this in code!)
+                    </div>
+                    {/* End Temporary Debugging Display */}
+
                     {/* Chat Header */}
                     {/* IMPORTANT: The onStartVideoCall handler is set here to initiate a 1-on-1 call for testing. */}
                     {/* Remember to replace 'OTHER_USER_USERNAME_HERE' in handleStartVideoCall with a real username. */}
