@@ -1,33 +1,29 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-// Removed: import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-// Removed: import for cartographer plugin
+import { fileURLToPath } from 'url'; // NEW: Import fileURLToPath from 'url'
+
+// __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url); // NEW: Get current file path
+const __dirname = path.dirname(__filename); // NEW: Get current directory name
 
 export default defineConfig({
   plugins: [
     react(),
-    // Removed Replit-specific plugins as they are not needed for Render deployment
-    // runtimeErrorOverlay(),
-    // ...(process.env.NODE_ENV !== "production" &&
-    // process.env.REPL_ID !== undefined
-    //   ? [
-    //       await import("@replit/vite-plugin-cartographer").then((m) =>
-    //         m.cartographer(),
-    //       ),
-    //     ]
-    //   : []),
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "client", "src"), // Use __dirname for consistency
-      "@shared": path.resolve(__dirname, "shared"), // Use __dirname for consistency
-      "@assets": path.resolve(__dirname, "attached_assets"), // Use __dirname for consistency
+      // MODIFIED: Use the __dirname equivalent for path resolution
+      "@": path.resolve(__dirname, "client", "src"),
+      "@shared": path.resolve(__dirname, "shared"),
+      "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
-  root: path.resolve(__dirname, "client"), // Use __dirname for consistency
+  // MODIFIED: Use the __dirname equivalent for root
+  root: path.resolve(__dirname, "client"),
   build: {
-    outDir: path.resolve(__dirname, "dist/public"), // Use __dirname for consistency
+    // MODIFIED: Use the __dirname equivalent for outDir
+    outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
   },
 });
