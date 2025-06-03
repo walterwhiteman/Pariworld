@@ -14,8 +14,8 @@ export function useSocket() {
     // Define your backend Socket.IO URL here
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
-    // This map stores handlers that need to be re-attached on reconnect
-    const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map());
+    // --- REMOVED: eventHandlersRef is no longer needed for re-attaching ---
+    // const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map());
 
     // Emit function: always checks if socket is connected
     const emit = useCallback((eventName: string, payload: any) => {
@@ -27,33 +27,25 @@ export function useSocket() {
         }
     }, []);
 
-    // On function: adds handler to ref, and attaches to socket if connected
+    // --- MODIFIED: Simplified 'on' function ---
+    // This 'on' function now directly attaches the handler to the current socket instance.
+    // The cleanup function returned by 'on' will remove this specific handler.
     const on = useCallback((eventName: string, handler: Function) => {
-        if (!eventHandlersRef.current.has(eventName)) {
-            eventHandlersRef.current.set(eventName, new Set());
-        }
-        eventHandlersRef.current.get(eventName)!.add(handler);
-
-        // If socket is already connected, attach handler immediately
-        if (socketRef.current && socketRef.current.connected) {
+        if (socketRef.current) {
             socketRef.current.on(eventName, handler);
+        } else {
+            // If socket is not yet initialized, queue the handler or log a warning
+            console.warn(`[useSocket] Socket not yet initialized when trying to attach '${eventName}' handler.`);
+            // In a more complex scenario, you might queue these to attach on 'connect'
         }
 
         // Return a cleanup function for this specific handler
         return () => {
-            const handlers = eventHandlersRef.current.get(eventName);
-            if (handlers) {
-                handlers.delete(handler);
-                if (handlers.size === 0) {
-                    eventHandlersRef.current.delete(eventName);
-                }
-            }
-            // Also remove from the active socket if it exists
             if (socketRef.current) {
                 socketRef.current.off(eventName, handler);
             }
         };
-    }, []); // No dependencies for 'on' itself, as it relies on socketRef.current
+    }, []); // No dependencies for 'on' itself, as it works with socketRef.current
 
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
@@ -72,24 +64,16 @@ export function useSocket() {
                 console.log('[useSocket] Socket.IO connected successfully! (Frontend)');
                 setIsConnected(true);
                 setConnectionError(null);
-
-                // Re-attach all handlers that were registered via the 'on' function
-                eventHandlersRef.current.forEach((handlers, eventName) => {
-                    handlers.forEach(handler => {
-                        socketInstance.on(eventName, handler);
-                    });
-                });
+                // --- REMOVED: No need to re-attach handlers here.
+                // The 'on' function in ChatPage's useEffect will handle its own subscriptions
+                // when the socket becomes connected.
             });
 
             socketInstance.on('disconnect', (reason) => {
                 console.log('[useSocket] Socket.IO disconnected! (Frontend):', reason);
                 setIsConnected(false);
-                // Remove all currently attached handlers to prevent memory leaks/double-listening on reconnect
-                eventHandlersRef.current.forEach((handlers, eventName) => {
-                    handlers.forEach(handler => {
-                        socketInstance.off(eventName, handler);
-                    });
-                });
+                // --- REMOVED: No need to remove handlers here.
+                // The cleanup returned by individual 'on' calls handles detachment.
                 if (reason === 'io server disconnect') {
                     // Server initiated disconnect, Socket.IO won't auto-reconnect unless told to
                     setConnectionError('Disconnected by server. Attempting to reconnect...');
@@ -113,12 +97,8 @@ export function useSocket() {
                 console.log(`[useSocket] Reconnected successfully after ${attemptNumber} attempts`);
                 setIsConnected(true);
                 setConnectionError(null);
-                // Re-attach all handlers on successful reconnect
-                eventHandlersRef.current.forEach((handlers, eventName) => {
-                    handlers.forEach(handler => {
-                        socketInstance.on(eventName, handler);
-                    });
-                });
+                // --- REMOVED: No need to re-attach handlers here.
+                // Handlers are re-attached by the 'on' function if the socket is connected.
             });
 
             socketInstance.on('reconnect_error', (error) => {
@@ -136,13 +116,9 @@ export function useSocket() {
         return () => {
             if (socketRef.current) {
                 console.log('[useSocket] Disconnecting Socket.IO on component unmount.');
-                // Remove all listeners before disconnecting to prevent memory leaks
+                // Remove all listeners attached to this socket instance for a clean unmount.
+                // This 'offAny' is important to ensure no lingering listeners from this hook.
                 socketRef.current.offAny();
-                eventHandlersRef.current.forEach((handlers, eventName) => {
-                    handlers.forEach(handler => {
-                        socketRef.current?.off(eventName, handler);
-                    });
-                });
                 socketRef.current.disconnect();
                 socketRef.current = null; // Clear the ref
                 setIsConnected(false);
