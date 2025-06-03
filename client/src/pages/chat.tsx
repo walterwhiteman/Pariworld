@@ -1,5 +1,3 @@
-pages/chat.tsx
-
 import { useState, useCallback, useEffect } from 'react';
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
