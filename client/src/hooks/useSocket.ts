@@ -7,17 +7,15 @@ import { ChatMessage, SocketEvents } from '@/types/chat';
  * Handles real-time communication for the private chat application
  */
 export function useSocket() {
-    // MODIFIED: Initialize socket state to undefined. It will only be set to a Socket instance upon successful connection.
     const [socket, setSocket] = useState<Socket | undefined>(undefined);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
 
-    // Define your backend Socket.IO URL here
-    const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
+    const BACKEND_URL = 'https://pariworld-backend.onrender.com';
 
     // Emit function: always checks if socket is connected
     const emit = (eventName: string, payload: any) => {
-        if (socket && socket.connected) { // Check the state variable 'socket'
+        if (socket && socket.connected) {
             socket.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
@@ -27,7 +25,7 @@ export function useSocket() {
 
     // On function: directly attaches handler to the current socket instance.
     const on = (eventName: string, handler: Function) => {
-        if (socket) { // Check the state variable 'socket'
+        if (socket) {
             socket.on(eventName, handler);
         } else {
             console.warn(`[useSocket] Socket not yet available when trying to attach '${eventName}' handler.`);
@@ -35,31 +33,25 @@ export function useSocket() {
 
         // Return a cleanup function for this specific handler
         return () => {
-            if (socket) { // Cleanup also depends on the 'socket' state
+            if (socket) {
                 socket.off(eventName, handler);
             }
         };
     };
 
-    // Effect to initialize and manage Socket.IO connection
+    // MODIFIED: This useEffect now runs ONLY ONCE on component mount.
+    // It initializes the socket instance and sets up its core lifecycle listeners.
     useEffect(() => {
-        // If socket is already a Socket instance, don't re-initialize
-        if (socket) {
-            console.log('[useSocket useEffect] Socket already initialized, skipping re-init.');
-            return;
-        }
-
-        console.log('[useSocket useEffect] Attempting to connect to Socket.IO:', BACKEND_URL);
+        console.log('[useSocket useEffect] Initializing Socket.IO client.');
         const socketInstance = io(BACKEND_URL, {
             path: '/ws',
             transports: ['websocket', 'polling'],
             withCredentials: true
         });
 
-        // --- Socket.IO Event Listeners for the connection lifecycle ---
         socketInstance.on('connect', () => {
             console.log('[useSocket] Socket.IO connected successfully! (Frontend)');
-            setSocket(socketInstance); // MODIFIED: Set socket state ONLY on successful connection
+            setSocket(socketInstance); // Set the socket state only on successful connection
             setIsConnected(true);
             setConnectionError(null);
             console.log('[useSocket] Socket state set to connected instance.');
@@ -68,10 +60,10 @@ export function useSocket() {
         socketInstance.on('disconnect', (reason) => {
             console.log('[useSocket] Socket.IO disconnected! (Frontend):', reason);
             setIsConnected(false);
-            setSocket(undefined); // MODIFIED: Clear socket state on disconnect
+            setSocket(undefined); // Clear socket state on disconnect
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
-                socketInstance.connect(); // Manually attempt to reconnect
+                socketInstance.connect();
             } else {
                 setConnectionError(`Disconnected: ${reason}`);
             }
@@ -81,7 +73,7 @@ export function useSocket() {
             console.error('[useSocket] Socket.IO connection error! (Frontend):', error.message, error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
             setIsConnected(false);
-            setSocket(undefined); // MODIFIED: Clear socket state on connection error
+            setSocket(undefined);
         });
 
         socketInstance.on('reconnect_attempt', (attemptNumber) => {
@@ -90,7 +82,7 @@ export function useSocket() {
 
         socketInstance.on('reconnect', (attemptNumber) => {
             console.log(`[useSocket] Reconnected successfully after ${attemptNumber} attempts`);
-            setSocket(socketInstance); // MODIFIED: Set socket state on successful reconnect
+            setSocket(socketInstance);
             setIsConnected(true);
             setConnectionError(null);
         });
@@ -98,35 +90,32 @@ export function useSocket() {
         socketInstance.on('reconnect_error', (error) => {
             console.error('[useSocket] Reconnect error:', error.message);
             setConnectionError(`Reconnect failed: ${error.message}`);
-            setSocket(undefined); // MODIFIED: Clear socket state on reconnect error
+            setSocket(undefined);
         });
 
         socketInstance.on('reconnect_failed', () => {
             console.error('[useSocket] Reconnect failed permanently.');
             setConnectionError('Reconnect failed permanently. Please refresh.');
-            setSocket(undefined); // MODIFIED: Clear socket state on permanent reconnect failure
+            setSocket(undefined);
         });
 
-        // Cleanup function for the useEffect: disconnects the socket when the component using useSocket unmounts
+        // Cleanup function for this specific useEffect: disconnects the socket when the component using useSocket unmounts
         return () => {
-            if (socketInstance) { // Use socketInstance from this closure
-                console.log('[useSocket useEffect] Disconnecting Socket.IO on component unmount.');
+            if (socketInstance) {
+                console.log('[useSocket useEffect] Disconnecting Socket.IO client on unmount.');
                 socketInstance.offAny(); // Remove all listeners from this specific instance
                 socketInstance.disconnect();
-                setSocket(undefined); // Clear the socket instance from state
-                setIsConnected(false);
-                setConnectionError(null);
             }
         };
-    }, [socket, BACKEND_URL]); // Dependency on 'socket' state to prevent re-initialization
+    }, [BACKEND_URL]); // MODIFIED: Empty dependency array to run only once, or just BACKEND_URL if it's dynamic
 
-    // Use useCallback for the returned functions to ensure stable references for React components
+    // These useCallbacks are fine as they depend on 'socket' which is state.
     return {
-        socket, // Return the state variable 'socket'
+        socket,
         isConnected,
         connectionError,
-        emit: useCallback(emit, [socket, emit]), // Added socket to dependencies
-        on: useCallback(on, [socket, on]),       // Added socket to dependencies
+        emit: useCallback(emit, [socket]), // emit depends on 'socket'
+        on: useCallback(on, [socket]),     // on depends on 'socket'
         joinRoom: useCallback((roomId: string, username: string) => {
             emit(SocketEvents.JoinRoom, { roomId, username });
         }, [emit]),
