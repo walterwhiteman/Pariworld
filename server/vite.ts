@@ -5,6 +5,11 @@ import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
+import { fileURLToPath } from 'url'; // NEW: Import fileURLToPath
+
+// NEW: Define __filename and __dirname for ES module scope
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const viteLogger = createLogger();
 
@@ -45,8 +50,9 @@ export async function setupVite(app: Express, server: Server) {
     const url = req.originalUrl;
 
     try {
+      // MODIFIED: Use the defined __dirname
       const clientTemplate = path.resolve(
-        import.meta.dirname,
+        __dirname, // Use the defined __dirname
         "..",
         "client",
         "index.html",
@@ -68,7 +74,8 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // MODIFIED: Use the defined __dirname
+  const distPath = path.resolve(__dirname, "public"); // Use the defined __dirname
 
   if (!fs.existsSync(distPath)) {
     throw new Error(
@@ -80,6 +87,7 @@ export function serveStatic(app: Express) {
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (_req, res) => {
+    // MODIFIED: Use the defined __dirname
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
