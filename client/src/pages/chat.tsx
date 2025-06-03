@@ -1,12 +1,12 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react'; // Added useRef
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
-import { useSocket } from '@/hooks/useSocket'; // This now imports the consumer hook
-import { useWebRTC } from '@/hooks/useWebRTC';
+import { useSocket } from '@/hooks/useSocket';
+// import { useWebRTC } from '@/hooks/useWebRTC'; // TEMPORARILY REMOVED FOR DIAGNOSIS
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
@@ -33,7 +33,13 @@ export default function ChatPage() {
 
     // Hooks - useSocket now gets its value from context
     const { socket, isConnected: socketIsConnected, connectionError, joinRoom, leaveRoom, sendMessage, sendTypingStatus, on } = useSocket();
-    const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
+    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // TEMPORARILY REMOVED FOR DIAGNOSIS
+
+    // Use a ref to store the latest roomState and username for handlers
+    const roomStateRef = useRef(roomState);
+    useEffect(() => {
+        roomStateRef.current = roomState;
+    }, [roomState]);
 
     /**
      * Add a notification
@@ -94,7 +100,7 @@ export default function ChatPage() {
 
         joinRoom(roomId, username); // Use joinRoom from context
         console.log('[ChatPage] Emitted join-room event.');
-    }, [socket, socketIsConnected, joinRoom, addNotification]); // Added joinRoom to dependencies
+    }, [socket, socketIsConnected, joinRoom, addNotification]);
 
     /**
      * Leave the current room
@@ -104,10 +110,6 @@ export default function ChatPage() {
         if (roomState.roomId && roomState.username && socket) {
             leaveRoom(roomState.roomId, roomState.username); // Use leaveRoom from context
             console.log('[ChatPage] Emitted leave-room event.');
-        }
-
-        if (webRTC.callState.isActive) {
-            webRTC.endCall();
         }
 
         setRoomState({
@@ -123,7 +125,7 @@ export default function ChatPage() {
         console.log('[ChatPage] Resetting all chat states to initial, opening modal.');
 
         addNotification('info', 'Left Room', 'You have left the chat room');
-    }, [roomState, socket, leaveRoom, webRTC, addNotification]); // Added leaveRoom to dependencies
+    }, [roomState, socket, leaveRoom, addNotification]);
 
     /**
      * Send a message
@@ -142,25 +144,25 @@ export default function ChatPage() {
             messageType: message.messageType
         });
         console.log(`[ChatPage] Sent message: ${message.content?.substring(0, 20)}...`);
-    }, [roomState.isConnected, socket, sendMessage, addNotification]); // Added sendMessage to dependencies
+    }, [roomState.isConnected, socket, sendMessage, addNotification]);
 
     /**
      * Handle typing start
      */
     const handleTypingStart = useCallback(() => {
         if (roomState.isConnected && socket) {
-            sendTypingStatus(roomState.roomId, roomState.username, true); // Use sendTypingStatus from context
+            sendTypingStatus(roomState.roomId, roomState.username, true);
         }
-    }, [roomState, socket, sendTypingStatus]); // Added sendTypingStatus to dependencies
+    }, [roomState, socket, sendTypingStatus]);
 
     /**
      * Handle typing stop
      */
     const handleTypingStop = useCallback(() => {
         if (roomState.isConnected && socket) {
-            sendTypingStatus(roomState.roomId, roomState.username, false); // Use sendTypingStatus from context
+            sendTypingStatus(roomState.roomId, roomState.username, false);
         }
-    }, [roomState, socket, sendTypingStatus]); // Added sendTypingStatus to dependencies
+    }, [roomState, socket, sendTypingStatus]);
 
     const handleStartVideoCall = useCallback(() => {
         if (!roomState.isConnected) {
@@ -175,16 +177,10 @@ export default function ChatPage() {
             return;
         }
 
-        if (!roomState.participants.includes(userToCall)) {
-             addNotification('warning', 'Call Info', `${userToCall} is not currently in this room.`);
-             return;
-        }
-
-        webRTC.startCall(userToCall);
         console.log(`[ChatPage] Attempting to call: ${userToCall}`);
         addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
 
-    }, [roomState, webRTC, addNotification]);
+    }, [roomState, addNotification]);
 
 
     /**
@@ -199,8 +195,8 @@ export default function ChatPage() {
 
         console.log('[ChatPage useEffect] Socket IS ready, setting up listeners.');
 
-        // Room joined successfully
-        const unsubscribeRoomJoined = on('room-joined', (data: { roomId: string; participants: string[] }) => {
+        // Define handlers using useCallback to ensure stable references
+        const handleRoomJoined = (data: { roomId: string; participants: string[] }) => {
             console.log(`[Frontend] Room joined successfully event received. Data:`, data);
             console.log(`[Frontend] Before setting isRoomModalOpen to false, it was: ${isRoomModalOpen}`);
 
@@ -210,11 +206,10 @@ export default function ChatPage() {
                 participants: data.participants
             }));
 
-            setIsRoomModalOpen(false); // THIS IS THE LINE THAT CLOSES THE MODAL
+            setIsRoomModalOpen(false);
             setIsConnecting(false);
             console.log('[Frontend] isRoomModalOpen set to false, isConnected set to true.');
 
-            // Add system message for *this* user only
             const systemMessage: ChatMessage = {
                 id: generateClientMessageId(),
                 roomId: data.roomId,
@@ -228,10 +223,9 @@ export default function ChatPage() {
                 messages: [...prev.messages, systemMessage]
             }));
             addNotification('success', 'Room Joined', `Welcome to ${data.roomId}!`);
-        });
+        };
 
-        // Listen for incoming messages
-        const unsubscribeMessageReceived = on('message-received', (message: ChatMessage) => {
+        const handleMessageReceived = (message: ChatMessage) => {
             console.log('[Frontend] Message received:', message);
             const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
 
@@ -241,42 +235,38 @@ export default function ChatPage() {
                     ? prev.messages
                     : [...prev.messages, parsedMessage]
             }));
-            if (message.sender !== roomState.username) {
+            if (message.sender !== roomStateRef.current.username) { // Use ref for latest username
                 addNotification('info', 'New Message', `From ${message.sender} in ${message.roomId}`);
             }
-        });
+        };
 
-        // Listen for participant joined events
-        const unsubscribeParticipantJoined = on('participant-joined', (data: { username: string; roomId: string; participants: string[] }) => {
+        const handleParticipantJoined = (data: { username: string; roomId: string; participants: string[] }) => {
             console.log('[Frontend] Participant joined:', data);
             setRoomState(prev => ({
                 ...prev,
                 participants: data.participants
             }));
             addNotification('info', 'Participant Joined', `${data.username} has joined the room.`);
-        });
+        };
 
-        // Listen for participant left events
-        const unsubscribeParticipantLeft = on('participant-left', (data: { username: string; roomId: string; participants: string[] }) => {
+        const handleParticipantLeft = (data: { username: string; roomId: string; participants: string[] }) => {
             console.log('[Frontend] Participant left:', data);
             setRoomState(prev => ({
                 ...prev,
                 participants: data.participants
             }));
             addNotification('info', 'Participant Left', `${data.username} has left the room.`);
-        });
+        };
 
-        // Listen for typing status updates
-        const unsubscribeTypingStatus = on('typing-status', (data: { username: string; isTyping: boolean }) => {
-            if (data.isTyping && data.username !== roomState.username) {
+        const handleTypingStatus = (data: { username: string; isTyping: boolean }) => {
+            if (data.isTyping && data.username !== roomStateRef.current.username) { // Use ref for latest username
                 setTypingUser(data.username);
             } else {
                 setTypingUser(undefined);
             }
-        });
+        };
 
-        // Listen for message history (when joining a room)
-        const unsubscribeRoomHistory = on('message-history', (data: { messages: ChatMessage[] }) => {
+        const handleMessageHistory = (data: { messages: ChatMessage[] }) => {
             console.log('[Frontend] Message history received:', data.messages);
             const historyMessages = data.messages.map(msg => ({
                 ...msg,
@@ -286,30 +276,36 @@ export default function ChatPage() {
                 ...prev,
                 messages: historyMessages
             }));
-        });
+        };
 
-        // Listen for general socket errors
-        const unsubscribeError = on('error', (error: { message: string }) => {
+        const handleError = (error: { message: string }) => {
             console.error('[Frontend] Socket error:', error);
             addNotification('error', 'Socket Error', error.message);
             setIsConnecting(false);
             setRoomState(prev => ({ ...prev, isConnected: false }));
-        });
+        };
+
+        // Attach listeners
+        const unsubscribeRoomJoined = on('room-joined', handleRoomJoined);
+        const unsubscribeMessageReceived = on('message-received', handleMessageReceived);
+        const unsubscribeParticipantJoined = on('participant-joined', handleParticipantJoined);
+        const unsubscribeParticipantLeft = on('participant-left', handleParticipantLeft);
+        const unsubscribeTypingStatus = on('typing-status', handleTypingStatus);
+        const unsubscribeRoomHistory = on('message-history', handleMessageHistory);
+        const unsubscribeError = on('error', handleError);
 
         // Cleanup function: unsubscribe from all socket events when component unmounts
         return () => {
             console.log('[ChatPage useEffect] Cleaning up socket listeners.');
-            if (socket) { // Check if socket exists before calling off
-                unsubscribeRoomJoined();
-                unsubscribeMessageReceived();
-                unsubscribeParticipantJoined();
-                unsubscribeParticipantLeft();
-                unsubscribeTypingStatus();
-                unsubscribeRoomHistory();
-                unsubscribeError();
-            }
+            unsubscribeRoomJoined();
+            unsubscribeMessageReceived();
+            unsubscribeParticipantJoined();
+            unsubscribeParticipantLeft();
+            unsubscribeTypingStatus();
+            unsubscribeRoomHistory();
+            unsubscribeError();
         };
-    }, [socket, socketIsConnected, roomState.username, addNotification, on]); // Added 'on' to dependencies
+    }, [socket, socketIsConnected, addNotification, on]); // Removed roomState.username from dependencies
 
     // Rendered UI
     return (
@@ -329,7 +325,7 @@ export default function ChatPage() {
                         username={roomState.username}
                         participants={roomState.participants}
                         onLeaveRoom={handleLeaveRoom}
-                        onStartVideoCall={handleStartVideoCall}
+                        // onStartVideoCall={handleStartVideoCall} // TEMPORARILY REMOVED
                     />
                     <ChatMessages
                         messages={roomState.messages}
@@ -347,7 +343,7 @@ export default function ChatPage() {
             )}
 
             {/* Video Call Modal */}
-            <VideoCallModal
+            {/* <VideoCallModal // TEMPORARILY REMOVED
                 isOpen={webRTC.callState.isModalOpen}
                 onClose={webRTC.closeCallModal}
                 localStream={webRTC.callState.localStream}
@@ -356,7 +352,7 @@ export default function ChatPage() {
                 onAcceptCall={webRTC.acceptCall}
                 onEndCall={webRTC.endCall}
                 callingUser={webRTC.callState.callingUser}
-            />
+            /> */}
 
             {/* Notification Toasts */}
             <div className="fixed bottom-4 right-4 z-50 space-y-2">
