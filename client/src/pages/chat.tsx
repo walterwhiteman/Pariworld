@@ -14,13 +14,15 @@ import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
  * Manages room state, messaging, notifications, and video calling
  */
 export default function ChatPage() {
+    console.log('[ChatPage Render] Component rendering...'); // ADDED: Log every render
+
     // Room and user state
     const [roomState, setRoomState] = useState<RoomState>({
         roomId: '',
         username: '',
         isConnected: false,
         participants: [],
-        messages: [] // This will be populated by history on join
+        messages: []
     });
 
     // UI state
@@ -62,7 +64,6 @@ export default function ChatPage() {
 
     /**
      * Generate a unique message ID (for temporary client-side use before DB assigns one)
-     * This is primarily for system messages or if optimistic updates are re-introduced carefully.
      */
     const generateClientMessageId = (): string => {
         return `client_msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -81,18 +82,17 @@ export default function ChatPage() {
         setIsConnecting(true);
         console.log('[ChatPage] Setting isConnecting to true.');
 
-        // Reset messages and participants when joining a new room
         setRoomState(prev => ({
             ...prev,
             roomId,
             username,
-            isConnected: false, // Ensure this is false before emitting join
-            messages: [], // Clear messages before joining to prepare for history
+            isConnected: false,
+            messages: [],
             participants: []
         }));
         console.log('[ChatPage] Room state reset for new join attempt.');
 
-        socket.joinRoom(roomId, username); // Use the joinRoom function from useSocket
+        socket.joinRoom(roomId, username);
         console.log('[ChatPage] Emitted join-room event.');
     }, [socket, socketIsConnected, addNotification]);
 
@@ -102,16 +102,14 @@ export default function ChatPage() {
     const handleLeaveRoom = useCallback(() => {
         console.log(`[ChatPage] handleLeaveRoom called. Current room: ${roomState.roomId}, user: ${roomState.username}`);
         if (roomState.roomId && roomState.username && socket) {
-            socket.leaveRoom(roomState.roomId, roomState.username); // Use the leaveRoom function from useSocket
+            socket.leaveRoom(roomState.roomId, roomState.username);
             console.log('[ChatPage] Emitted leave-room event.');
         }
 
-        // End video call if active
         if (webRTC.callState.isActive) {
             webRTC.endCall();
         }
 
-        // Reset state
         setRoomState({
             roomId: '',
             username: '',
@@ -193,9 +191,9 @@ export default function ChatPage() {
      * Set up socket event listeners
      */
     useEffect(() => {
-        console.log(`[ChatPage useEffect] Running effect. socket: ${!!socket}, socketIsConnected: ${socketIsConnected}, isRoomModalOpen: ${isRoomModalOpen}`);
+        console.log(`[ChatPage useEffect] Running effect for listeners. socket: ${!!socket}, socketIsConnected: ${socketIsConnected}`);
         if (!socket || !socketIsConnected) {
-            console.log('[ChatPage useEffect] Socket not ready, deferring listener setup.');
+            console.log('[ChatPage useEffect] Socket not ready for listeners, deferring setup.');
             return;
         }
 
@@ -311,9 +309,7 @@ export default function ChatPage() {
                 unsubscribeError();
             }
         };
-    }, [socket, socketIsConnected, roomState.username, addNotification, isRoomModalOpen]); // Added isRoomModalOpen to dependencies
-    // Note: Adding isRoomModalOpen to dependencies will re-run the effect if modal state changes.
-    // This is for debugging the sequence, might need adjustment later for optimal performance.
+    }, [socket, socketIsConnected, roomState.username, addNotification]); // REMOVED: isRoomModalOpen from dependencies
 
     // Rendered UI
     return (
