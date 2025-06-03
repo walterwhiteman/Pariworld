@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react'; // Removed useCallback as it's not used directly for emit/on
 import io, { Socket } from 'socket.io-client';
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
@@ -7,7 +7,7 @@ import { ChatMessage, SocketEvents } from '@/types/chat';
  * Handles real-time communication for the private chat application
  */
 export function useSocket() {
-    // MODIFIED: Use state for socket instance instead of ref
+    // Use state for socket instance to ensure reactivity
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -15,9 +15,10 @@ export function useSocket() {
     // Define your backend Socket.IO URL here
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
-    // MODIFIED: Removed useCallback from emit to ensure it always uses the latest 'socket'
+    // Emit function: always checks if socket is connected
+    // Not wrapped in useCallback as it directly depends on 'socket' state
     const emit = (eventName: string, payload: any) => {
-        if (socket && socket.connected) { // Check the state variable 'socket'
+        if (socket && socket.connected) {
             socket.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
@@ -25,9 +26,10 @@ export function useSocket() {
         }
     };
 
-    // MODIFIED: Removed useCallback from on to ensure it always uses the latest 'socket'
+    // On function: directly attaches handler to the current socket instance.
+    // Not wrapped in useCallback as it directly depends on 'socket' state
     const on = (eventName: string, handler: Function) => {
-        if (socket) { // Check the state variable 'socket'
+        if (socket) {
             socket.on(eventName, handler);
         } else {
             console.warn(`[useSocket] Socket not yet available when trying to attach '${eventName}' handler.`);
@@ -35,7 +37,7 @@ export function useSocket() {
 
         // Return a cleanup function for this specific handler
         return () => {
-            if (socket) { // Cleanup also depends on the 'socket' state
+            if (socket) {
                 socket.off(eventName, handler);
             }
         };
@@ -43,7 +45,7 @@ export function useSocket() {
 
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
-        // If socket is already set, don't re-initialize (important for preventing infinite loops)
+        // If socket is already set, don't re-initialize
         if (socket) return;
 
         console.log('[useSocket] Attempting to connect to Socket.IO:', BACKEND_URL);
@@ -99,7 +101,7 @@ export function useSocket() {
 
         // Cleanup function for the useEffect: disconnects the socket when the component using useSocket unmounts
         return () => {
-            if (socketInstance) { // Use socketInstance from this closure
+            if (socketInstance) {
                 console.log('[useSocket] Disconnecting Socket.IO on component unmount.');
                 socketInstance.offAny(); // Remove all listeners from this specific instance
                 socketInstance.disconnect();
@@ -110,24 +112,24 @@ export function useSocket() {
         };
     }, [socket, BACKEND_URL]); // Dependency on 'socket' state to prevent re-initialization
 
+    // Use useCallback for the returned functions to ensure stable references for React components
     return {
-        socket, // Return the state variable 'socket'
+        socket,
         isConnected,
         connectionError,
-        emit,
-        on,
-        // MODIFIED: Removed useCallback from these functions
-        joinRoom: (roomId: string, username: string) => {
+        emit: useCallback(emit, [emit]), // Wrap emit in useCallback
+        on: useCallback(on, [on]),       // Wrap on in useCallback
+        joinRoom: useCallback((roomId: string, username: string) => {
             emit(SocketEvents.JoinRoom, { roomId, username });
-        },
-        leaveRoom: (roomId: string, username: string) => {
+        }, [emit]),
+        leaveRoom: useCallback((roomId: string, username: string) => {
             emit(SocketEvents.LeaveRoom, { roomId, username });
-        },
-        sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+        }, [emit]),
+        sendMessage: useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
             emit(SocketEvents.SendMessage, message);
-        },
-        sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => {
+        }, [emit]),
+        sendTypingStatus: useCallback((roomId: string, username: string, isTyping: boolean) => {
             emit(isTyping ? SocketEvents.TypingStart : SocketEvents.TypingStop, { roomId, username });
-        }
+        }, [emit])
     };
 }
