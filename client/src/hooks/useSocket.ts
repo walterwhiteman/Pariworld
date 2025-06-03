@@ -116,18 +116,18 @@ export function useSocket() {
         connectionError,
         emit,
         on,
-        // These are fine as they use the 'emit' and 'on' functions
-        joinRoom: useCallback((roomId: string, username: string) => {
+        // MODIFIED: Removed useCallback from these functions
+        joinRoom: (roomId: string, username: string) => {
             emit(SocketEvents.JoinRoom, { roomId, username });
-        }, [emit]),
-        leaveRoom: useCallback((roomId: string, username: string) => {
+        },
+        leaveRoom: (roomId: string, username: string) => {
             emit(SocketEvents.LeaveRoom, { roomId, username });
-        }, [emit]),
-        sendMessage: useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+        },
+        sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
             emit(SocketEvents.SendMessage, message);
-        }, [emit]),
-        sendTypingStatus: useCallback((roomId: string, username: string, isTyping: boolean) => {
+        },
+        sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => {
             emit(isTyping ? SocketEvents.TypingStart : SocketEvents.TypingStop, { roomId, username });
-        }, [emit])
+        }
     };
 }
