@@ -195,7 +195,13 @@ export default function ChatPage() {
      * Set up socket event listeners
      */
     useEffect(() => {
-        if (!socket.on) return;
+        // --- MODIFIED: Only set up listeners if the socket is connected ---
+        if (!socket.isConnected) {
+            console.log('[ChatPage] Socket not connected, deferring listener setup.');
+            return;
+        }
+
+        console.log('[ChatPage] Socket is connected, setting up listeners.');
 
         // Room joined successfully
         const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
@@ -215,9 +221,9 @@ export default function ChatPage() {
                 id: generateClientMessageId(), // Use client-side ID for system messages
                 roomId: data.roomId,
                 sender: 'System',
-                content: `You have joined the room ${data.roomId}.`, // <--- COMPLETED THIS LINE
-                messageType: 'system', // Assuming system messages have a type
-                timestamp: new Date().toISOString() // Add timestamp
+                content: `You have joined the room ${data.roomId}.`,
+                messageType: 'system',
+                timestamp: new Date().toISOString()
             };
             setRoomState(prev => ({
                 ...prev,
@@ -287,6 +293,7 @@ export default function ChatPage() {
 
         // Cleanup function: unsubscribe from all socket events when component unmounts
         return () => {
+            console.log('[ChatPage] Cleaning up socket listeners.');
             unsubscribeRoomJoined();
             unsubscribeMessageReceived();
             unsubscribeParticipantJoined();
@@ -357,4 +364,3 @@ export default function ChatPage() {
         </div>
     );
 }
-
