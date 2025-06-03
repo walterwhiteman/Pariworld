@@ -3,9 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatPage from "@/pages/chat";
-// Ensure this import correctly points to the renamed file.
-// If you're using path aliases, it might not explicitly show .tsx,
-// but the underlying file MUST be .tsx
+// This import will now correctly resolve to src/hooks/useSocket.tsx after the rename.
 import { SocketProvider } from '@/hooks/useSocket';
 import React from 'react';
 
