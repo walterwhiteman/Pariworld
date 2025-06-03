@@ -2,20 +2,26 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import ChatPage from "@/pages/chat"; // Ensure this import is correct
+import ChatPage from "@/pages/chat";
+import { SocketProvider } from '@/hooks/useSocket';
+import React from 'react'; // ADDED: Import React for React.memo
 
-function App() {
-  console.log('[App.tsx Render] App component rendering...'); // ADDED: Log every render
+function AppContent() {
+  console.log('[App.tsx Render] AppContent component rendering...'); // Log every render of the inner component
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        {/* MODIFIED: Directly render ChatPage, removing wouter for now */}
-        <ChatPage />
+        <SocketProvider>
+          <ChatPage />
+        </SocketProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
 }
+
+// MODIFIED: Export a memoized version of the App component
+const App = React.memo(AppContent);
 
 export default App;
