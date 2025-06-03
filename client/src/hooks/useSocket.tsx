@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode, useRef } from 'react';
 import io, { Socket } from 'socket.io-client';
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
@@ -33,6 +33,9 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     const BACKEND_URL = 'https://pariworld-backend.onrender.com';
 
+    // Use a ref to store the actual socket instance to prevent stale closures
+    const socketRef = useRef<Socket | undefined>(undefined);
+
     // This useEffect initializes the Socket.IO client ONLY ONCE when the provider mounts
     useEffect(() => {
         console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
@@ -42,9 +45,11 @@ export function SocketProvider({ children }: SocketProviderProps) {
             withCredentials: true
         });
 
+        socketRef.current = socketInstance; // Store instance in ref
+
         socketInstance.on('connect', () => {
             console.log('[SocketProvider] Socket.IO connected successfully! (Frontend)');
-            setSocket(socketInstance); // Set the socket state only on successful connection
+            setSocket(socketInstance); // Update state
             setIsConnected(true);
             setConnectionError(null);
             console.log('[SocketProvider] Socket state set to connected instance.');
@@ -53,7 +58,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         socketInstance.on('disconnect', (reason) => {
             console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
             setIsConnected(false);
-            setSocket(undefined); // Clear socket state on disconnect
+            setSocket(undefined); // Clear state
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
                 socketInstance.connect();
@@ -94,36 +99,39 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
         // Cleanup function for this specific useEffect: disconnects the socket when the provider unmounts
         return () => {
-            if (socketInstance) {
+            if (socketRef.current) { // Use ref for cleanup
                 console.log('[SocketProvider useEffect] Disconnecting Socket.IO client on provider unmount.');
-                socketInstance.offAny(); // Remove all listeners from this specific instance
-                socketInstance.disconnect();
+                socketRef.current.offAny(); // Remove all listeners from this specific instance
+                socketRef.current.disconnect();
             }
         };
     }, [BACKEND_URL]); // Empty dependency array to run only once on mount
 
-    // Memoized functions that depend on the 'socket' state
+    // Memoized functions that use the socketRef
     const emit = useCallback((eventName: string, payload: any) => {
-        if (socket && socket.connected) {
-            socket.emit(eventName, payload);
+        if (socketRef.current && socketRef.current.connected) {
+            socketRef.current.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
             console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected or not initialized.`);
         }
-    }, [socket]);
+    }, []); // No dependencies, always uses latest socketRef.current
 
     const on = useCallback((eventName: string, handler: Function) => {
-        if (socket) {
-            socket.on(eventName, handler);
+        const currentSocket = socketRef.current; // Get current socket from ref
+        if (currentSocket) {
+            console.log(`[Socket.on] Attaching '${eventName}' handler.`);
+            currentSocket.on(eventName, handler);
         } else {
             console.warn(`[Socket.on] Socket not yet available when trying to attach '${eventName}' handler.`);
         }
         return () => {
-            if (socket) {
-                socket.off(eventName, handler);
+            if (currentSocket) { // Use the same socket instance for cleanup
+                console.log(`[Socket.on Cleanup] Detaching '${eventName}' handler.`); // ADDED LOG
+                currentSocket.off(eventName, handler);
             }
         };
-    }, [socket]);
+    }, []); // No dependencies, always uses latest socketRef.current
 
     const joinRoom = useCallback((roomId: string, username: string) => {
         emit(SocketEvents.JoinRoom, { roomId, username });
@@ -143,7 +151,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // The value provided to the context
     const contextValue = {
-        socket,
+        socket, // This is the state variable, which causes re-renders when it changes
         isConnected,
         connectionError,
         emit,
