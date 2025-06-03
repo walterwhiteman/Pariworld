@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'; // Removed useCallback as it's not used directly for emit/on
+import { useEffect, useState, useCallback } from 'react'; // ADDED useCallback here
 import io, { Socket } from 'socket.io-client';
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
@@ -16,7 +16,6 @@ export function useSocket() {
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
     // Emit function: always checks if socket is connected
-    // Not wrapped in useCallback as it directly depends on 'socket' state
     const emit = (eventName: string, payload: any) => {
         if (socket && socket.connected) {
             socket.emit(eventName, payload);
@@ -27,7 +26,6 @@ export function useSocket() {
     };
 
     // On function: directly attaches handler to the current socket instance.
-    // Not wrapped in useCallback as it directly depends on 'socket' state
     const on = (eventName: string, handler: Function) => {
         if (socket) {
             socket.on(eventName, handler);
