@@ -176,6 +176,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
         });
 
         socket.on('send-message', async (messageData: { content?: string, imageData?: string, messageType?: 'text' | 'image' | 'system' }) => {
+            console.log(`[Backend] Received send-message from ${socket.data.username} in room ${socket.data.roomId}`); // ADDED LOG
             const { roomId, username } = socket.data;
 
             if (!roomId || !username) {
@@ -207,7 +208,7 @@ export async function registerRoutes(app: Express): Promise<{ httpServer: Server
                 timestamp: new Date().toISOString()
             });
 
-            console.log(`Message sent in room ${roomId} by ${username}`);
+            console.log(`[Backend] Message broadcasted in room ${roomId} by ${username}`); // ADDED LOG
         });
 
         socket.on('typing-start', (payload: { roomId: string, username: string }) => {
