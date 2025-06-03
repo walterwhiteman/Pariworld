@@ -1,65 +1,70 @@
 // Chat message types
 export interface ChatMessage {
-  id: string;
-  roomId: string;
-  sender: string;
-  content?: string;
-  imageData?: string;
-  messageType: 'text' | 'image' | 'system';
-  timestamp: Date;
-  isSelf?: boolean;
+    id: string;
+    roomId: string;
+    sender: string;
+    content?: string;
+    imageData?: string;
+    messageType: 'text' | 'image' | 'system';
+    timestamp: Date;
+    isSelf?: boolean;
 }
 
-// Socket event types
-export interface SocketEvents {
-  // Client to server events
-  'join-room': (data: { roomId: string; username: string }) => void;
-  'leave-room': (data: { roomId: string; username: string }) => void;
-  'send-message': (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
-  'typing-start': (data: { roomId: string; username: string }) => void;
-  'typing-stop': (data: { roomId: string; username: string }) => void;
-  
-  // Server to client events
-  'room-joined': (data: { roomId: string; participants: string[] }) => void;
-  'room-left': (data: { roomId: string; username: string }) => void;
-  'message-received': (message: ChatMessage) => void;
-  'user-typing': (data: { username: string; isTyping: boolean }) => void;
-  'error': (data: { message: string }) => void;
-  'connection-status': (data: { connected: boolean; participantCount: number }) => void;
+// MODIFIED: Define SocketEvents as a const enum for actual event names
+export const enum SocketEvents {
+    // Client to server events
+    JoinRoom = 'join-room',
+    LeaveRoom = 'leave-room',
+    SendMessage = 'send-message',
+    TypingStart = 'typing-start',
+    TypingStop = 'typing-stop',
+
+    // Server to client events
+    RoomJoined = 'room-joined',
+    RoomLeft = 'room-left',
+    MessageReceived = 'message-received',
+    // It's good practice to use consistent casing like 'typing-status'
+    // in your backend and frontend. Assuming 'typing-status' from previous discussion.
+    TypingStatus = 'typing-status', // Changed from 'user-typing' to 'typing-status' for consistency
+    Error = 'error',
+    ConnectionStatus = 'connection-status',
 }
 
 // Room state
 export interface RoomState {
-  roomId: string;
-  username: string;
-  isConnected: boolean;
-  participants: string[];
-  messages: ChatMessage[];
+    roomId: string;
+    username: string;
+    isConnected: boolean;
+    participants: string[];
+    messages: ChatMessage[];
 }
 
 // Notification types
 export interface NotificationData {
-  id: string;
-  type: 'success' | 'error' | 'info' | 'warning';
-  title: string;
-  message: string;
-  duration?: number;
+    id: string;
+    type: 'success' | 'error' | 'info' | 'warning';
+    title: string;
+    message: string;
+    duration?: number;
 }
 
 // Video call types (for WebRTC stretch goal)
 export interface VideoCallState {
-  isActive: boolean;
-  isLocalVideoEnabled: boolean;
-  isLocalAudioEnabled: boolean;
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
-  callDuration: number;
+    isActive: boolean;
+    isLocalVideoEnabled: boolean;
+    isLocalAudioEnabled: boolean;
+    localStream: MediaStream | null;
+    remoteStream: MediaStream | null;
+    callDuration: number;
+    status: 'idle' | 'calling' | 'incoming' | 'active' | 'ended'; // Add call status
+    callingUser: string | null; // User initiating the call
 }
 
 // WebRTC signaling messages
 export interface WebRTCSignal {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end';
-  data: any;
-  roomId: string;
-  sender: string;
+    type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end' | 'call-accepted' | 'call-rejected' | 'call-hangup'; // Expanded types
+    data: any;
+    roomId: string;
+    sender: string; // The user who sent the signal
+    recipient?: string; // The intended recipient for 1-on-1 calls
 }
