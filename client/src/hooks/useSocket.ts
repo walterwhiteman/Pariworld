@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import io, { Socket } from 'socket.io-client';
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
@@ -7,131 +7,117 @@ import { ChatMessage, SocketEvents } from '@/types/chat';
  * Handles real-time communication for the private chat application
  */
 export function useSocket() {
+    // MODIFIED: Use state for socket instance instead of ref
+    const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
-    const socketRef = useRef<Socket | null>(null);
 
     // Define your backend Socket.IO URL here
     const BACKEND_URL = 'https://pariworld-backend.onrender.com'; // Your backend Render URL
 
-    // --- REMOVED: eventHandlersRef is no longer needed for re-attaching ---
-    // const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map());
-
     // Emit function: always checks if socket is connected
     const emit = useCallback((eventName: string, payload: any) => {
-        if (socketRef.current && socketRef.current.connected) {
-            socketRef.current.emit(eventName, payload);
+        if (socket && socket.connected) { // Check the state variable 'socket'
+            socket.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
         } else {
             console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected.`);
         }
-    }, []);
+    }, [socket]); // Dependency on 'socket' state
 
-    // --- MODIFIED: Simplified 'on' function ---
-    // This 'on' function now directly attaches the handler to the current socket instance.
-    // The cleanup function returned by 'on' will remove this specific handler.
+    // On function: directly attaches handler to the current socket instance.
+    // This 'on' function is used by ChatPage's useEffect to set up listeners.
     const on = useCallback((eventName: string, handler: Function) => {
-        if (socketRef.current) {
-            socketRef.current.on(eventName, handler);
+        if (socket) { // Check the state variable 'socket'
+            socket.on(eventName, handler);
         } else {
-            // If socket is not yet initialized, queue the handler or log a warning
-            console.warn(`[useSocket] Socket not yet initialized when trying to attach '${eventName}' handler.`);
-            // In a more complex scenario, you might queue these to attach on 'connect'
+            console.warn(`[useSocket] Socket not yet available when trying to attach '${eventName}' handler.`);
         }
 
         // Return a cleanup function for this specific handler
         return () => {
-            if (socketRef.current) {
-                socketRef.current.off(eventName, handler);
+            if (socket) { // Cleanup also depends on the 'socket' state
+                socket.off(eventName, handler);
             }
         };
-    }, []); // No dependencies for 'on' itself, as it works with socketRef.current
+    }, [socket]); // Dependency on 'socket' state
 
     // Effect to initialize and manage Socket.IO connection
     useEffect(() => {
-        // Only initialize if socketRef.current is null (first render or after full cleanup)
-        if (!socketRef.current) {
-            console.log('[useSocket] Attempting to connect to Socket.IO:', BACKEND_URL);
-            const socketInstance = io(BACKEND_URL, {
-                path: '/ws',
-                transports: ['websocket', 'polling'],
-                withCredentials: true
-            });
-            socketRef.current = socketInstance; // Assign the instance to the ref
+        // If socket is already set, don't re-initialize (important for preventing infinite loops)
+        if (socket) return;
 
-            // --- Socket.IO Event Listeners for the connection lifecycle ---
-            socketInstance.on('connect', () => {
-                console.log('[useSocket] Socket.IO connected successfully! (Frontend)');
-                setIsConnected(true);
-                setConnectionError(null);
-                // --- REMOVED: No need to re-attach handlers here.
-                // The 'on' function in ChatPage's useEffect will handle its own subscriptions
-                // when the socket becomes connected.
-            });
+        console.log('[useSocket] Attempting to connect to Socket.IO:', BACKEND_URL);
+        const socketInstance = io(BACKEND_URL, {
+            path: '/ws',
+            transports: ['websocket', 'polling'],
+            withCredentials: true
+        });
+        setSocket(socketInstance); // Set the socket instance in state
 
-            socketInstance.on('disconnect', (reason) => {
-                console.log('[useSocket] Socket.IO disconnected! (Frontend):', reason);
-                setIsConnected(false);
-                // --- REMOVED: No need to remove handlers here.
-                // The cleanup returned by individual 'on' calls handles detachment.
-                if (reason === 'io server disconnect') {
-                    // Server initiated disconnect, Socket.IO won't auto-reconnect unless told to
-                    setConnectionError('Disconnected by server. Attempting to reconnect...');
-                    socketInstance.connect(); // Manually attempt to reconnect
-                } else {
-                    setConnectionError(`Disconnected: ${reason}`);
-                }
-            });
+        // --- Socket.IO Event Listeners for the connection lifecycle ---
+        socketInstance.on('connect', () => {
+            console.log('[useSocket] Socket.IO connected successfully! (Frontend)');
+            setIsConnected(true);
+            setConnectionError(null);
+        });
 
-            socketInstance.on('connect_error', (error) => {
-                console.error('[useSocket] Socket.IO connection error! (Frontend):', error.message, error.stack);
-                setConnectionError(`Connection failed: ${error.message}`);
-                setIsConnected(false);
-            });
+        socketInstance.on('disconnect', (reason) => {
+            console.log('[useSocket] Socket.IO disconnected! (Frontend):', reason);
+            setIsConnected(false);
+            if (reason === 'io server disconnect') {
+                setConnectionError('Disconnected by server. Attempting to reconnect...');
+                socketInstance.connect(); // Manually attempt to reconnect
+            } else {
+                setConnectionError(`Disconnected: ${reason}`);
+            }
+        });
 
-            socketInstance.on('reconnect_attempt', (attemptNumber) => {
-                console.log(`[useSocket] Reconnect attempt #${attemptNumber}`);
-            });
+        socketInstance.on('connect_error', (error) => {
+            console.error('[useSocket] Socket.IO connection error! (Frontend):', error.message, error.stack);
+            setConnectionError(`Connection failed: ${error.message}`);
+        });
 
-            socketInstance.on('reconnect', (attemptNumber) => {
-                console.log(`[useSocket] Reconnected successfully after ${attemptNumber} attempts`);
-                setIsConnected(true);
-                setConnectionError(null);
-                // --- REMOVED: No need to re-attach handlers here.
-                // Handlers are re-attached by the 'on' function if the socket is connected.
-            });
+        socketInstance.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`[useSocket] Reconnect attempt #${attemptNumber}`);
+        });
 
-            socketInstance.on('reconnect_error', (error) => {
-                console.error('[useSocket] Reconnect error:', error.message);
-                setConnectionError(`Reconnect failed: ${error.message}`);
-            });
+        socketInstance.on('reconnect', (attemptNumber) => {
+            console.log(`[useSocket] Reconnected successfully after ${attemptNumber} attempts`);
+            setIsConnected(true);
+            setConnectionError(null);
+        });
 
-            socketInstance.on('reconnect_failed', () => {
-                console.error('[useSocket] Reconnect failed permanently.');
-                setConnectionError('Reconnect failed permanently. Please refresh.');
-            });
-        }
+        socketInstance.on('reconnect_error', (error) => {
+            console.error('[useSocket] Reconnect error:', error.message);
+            setConnectionError(`Reconnect failed: ${error.message}`);
+        });
+
+        socketInstance.on('reconnect_failed', () => {
+            console.error('[useSocket] Reconnect failed permanently.');
+            setConnectionError('Reconnect failed permanently. Please refresh.');
+        });
 
         // Cleanup function for the useEffect: disconnects the socket when the component using useSocket unmounts
         return () => {
-            if (socketRef.current) {
+            if (socketInstance) { // Use socketInstance from this closure
                 console.log('[useSocket] Disconnecting Socket.IO on component unmount.');
-                // Remove all listeners attached to this socket instance for a clean unmount.
-                // This 'offAny' is important to ensure no lingering listeners from this hook.
-                socketRef.current.offAny();
-                socketRef.current.disconnect();
-                socketRef.current = null; // Clear the ref
+                socketInstance.offAny(); // Remove all listeners from this specific instance
+                socketInstance.disconnect();
+                setSocket(null); // Clear the socket instance from state
                 setIsConnected(false);
                 setConnectionError(null);
             }
         };
-    }, [BACKEND_URL]); // Dependency on BACKEND_URL ensures effect runs if URL changes (unlikely here)
+    }, [socket, BACKEND_URL]); // Dependency on 'socket' state to prevent re-initialization
 
     return {
+        socket, // Return the state variable 'socket'
         isConnected,
         connectionError,
         emit,
         on,
+        // These are fine as they use the 'emit' and 'on' functions
         joinRoom: useCallback((roomId: string, username: string) => {
             emit(SocketEvents.JoinRoom, { roomId, username });
         }, [emit]),
