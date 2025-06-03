@@ -1,7 +1,9 @@
-// src/index.ts (Complete Code - MODIFIED)
+// src/index.ts (Refactored Code)
 
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { createServer, type Server as HttpServer } from "http"; // Import HttpServer type
+import { Server as SocketIOServer } from 'socket.io'; // Import SocketIOServer
+import { registerRoutes } from "./routes"; // This now accepts 'io' as an argument
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 
@@ -78,7 +80,21 @@ app.use((req, res, next) => {
 
 
 (async () => {
-    const { httpServer, io } = await registerRoutes(app); // registerRoutes returns both
+    // --- MODIFIED: Create HTTP server and Socket.IO server directly here ---
+    const httpServer: HttpServer = createServer(app); // Create HTTP server
+    const io: SocketIOServer = new SocketIOServer(httpServer, { // Attach Socket.IO to HTTP server
+        path: '/ws', // Frontend expects this path
+        cors: {
+            origin: "https://pariworld.onrender.com", // Ensure this matches your frontend URL
+            methods: ["GET", "POST"],
+            credentials: true
+        },
+        transports: ['websocket', 'polling']
+    });
+    console.log('[Backend] HTTP server and Socket.IO server instances created.');
+
+    // Pass the Socket.IO instance to registerRoutes to set up event handlers
+    await registerRoutes(app, io); // MODIFIED: Pass 'io' to registerRoutes
 
     // --- EXISTING: API ENDPOINT FOR MESSAGE CLEANUP ---
     app.post('/api/cleanup-messages', authenticateCleanup, async (req: Request, res: Response) => {
@@ -115,11 +131,11 @@ app.use((req, res, next) => {
     const port = process.env.PORT || 5000; // Default to 5000 if PORT is not set (e.g., local dev)
     const host = '0.0.0.0'; // Listen on all network interfaces for Render deployment
 
-    // Use the httpServer received from registerRoutes to listen
-    httpServer.listen({ // <--- Use httpServer.listen here
+    // Listen on the HTTP server, after Socket.IO is attached
+    httpServer.listen({
         port,
         host,
-        reusePort: true, // This can sometimes help with rapid restarts
+        reusePort: true,
     }, () => {
         log(`Backend server serving on http://${host}:${port}`);
         console.log(`[Backend] HTTP server listening on ${host}:${port}`);
