@@ -1,8 +1,10 @@
+// src/index.ts (Complete Code)
+
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { registerRoutes } from "./routes"; // This now returns { httpServer, io }
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
-import { Server as SocketIOServer } from 'socket.io'; // Import Socket.IO Server
+// No need to import createServer or SocketIOServer here anymore!
 
 import pkg from 'pg';
 const { Pool } = pkg;
@@ -11,13 +13,11 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// --- EXISTING CORS CONFIGURATION BLOCK (KEEP THIS ONE!) ---
 app.use(cors({
-  origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: REPLACE WITH YOUR ACTUAL RENDER FRONTEND URL
+  origin: "https://pariworld.onrender.com",
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
-// --- END CORS CONFIGURATION BLOCK ---
 
 const connectionString = process.env.DATABASE_URL;
 const CLEANUP_API_KEY = process.env.CLEANUP_API_KEY;
@@ -78,27 +78,8 @@ app.use((req, res, next) => {
 
 
 (async () => {
-  const server = await registerRoutes(app);
-
-    // --- MODIFIED: Initialize Socket.IO Server - REMOVED CORS OPTIONS ---
-    const io = new SocketIOServer(server, {
-        path: '/ws', // Keep this, it's crucial for the client connection
-        // REMOVED: cors: { origin: "https://pariworld.onrender.com", methods: ["GET", "POST"] }
-    });
-
-    // --- EXISTING: Basic Socket.IO Connection Handler ---
-    io.on('connection', (socket) => {
-        console.log(`Socket connected: ${socket.id}`);
-
-        socket.on('disconnect', (reason) => {
-            console.log(`Socket disconnected: ${socket.id}, Reason: ${reason}`);
-        });
-
-        // IMPORTANT: ADD YOUR CHAT-SPECIFIC SOCKET.IO EVENT LISTENERS HERE!
-        // ... (your existing socket.on event listeners) ...
-    });
-    // --- END SOCKET.IO SETUP ---
-
+  // --- MODIFIED: Destructure httpServer and io from registerRoutes ---
+  const { httpServer, io } = await registerRoutes(app); // registerRoutes now returns both
 
   // --- EXISTING: API ENDPOINT FOR MESSAGE CLEANUP ---
   app.post('/api/cleanup-messages', authenticateCleanup, async (req: Request, res: Response) => {
@@ -126,13 +107,14 @@ app.use((req, res, next) => {
   });
 
   if (app.get("env") === "development") {
-    await setupVite(app, server);
+    await setupVite(app, httpServer); // Pass httpServer to setupVite
   } else {
     serveStatic(app);
   }
 
   const port = 5000;
-  server.listen({
+  // Use the httpServer received from registerRoutes to listen
+  httpServer.listen({ // <--- Use httpServer.listen here
     port,
     host: "0.0.0.0",
     reusePort: true,
