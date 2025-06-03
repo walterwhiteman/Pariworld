@@ -135,10 +135,17 @@ app.use((req, res, next) => {
     httpServer.listen({
         port,
         host,
-        reusePort: true,
+        // MODIFIED: Removed reusePort: true as it can sometimes cause issues in container environments
     }, () => {
-        log(`Backend server serving on http://${host}:${port}`);
-        console.log(`[Backend] HTTP server listening on ${host}:${port}`);
-        console.log(`[Backend] Socket.IO server accessible via WebSocket on ws://${host}:${port}/ws`);
+        const address = httpServer.address();
+        if (address && typeof address === 'object') {
+            log(`Backend server serving on http://${address.address}:${address.port}`);
+            console.log(`[Backend] HTTP server listening on ${address.address}:${address.port}`);
+            console.log(`[Backend] Socket.IO server accessible via WebSocket on ws://${address.address}:${address.port}/ws`);
+        } else {
+            log(`Backend server serving on port ${port}`);
+            console.log(`[Backend] HTTP server listening on port ${port}`);
+            console.log(`[Backend] Socket.IO server accessible via WebSocket on ws://(host-unknown):${port}/ws`);
+        }
     });
 })();
