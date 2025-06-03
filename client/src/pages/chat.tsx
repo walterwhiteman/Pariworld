@@ -5,7 +5,7 @@ import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
-import { useSocket } from '@/hooks/useSocket';
+import { useSocket } from '@/hooks/useSocket'; // This now imports the consumer hook
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
@@ -14,7 +14,7 @@ import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
  * Manages room state, messaging, notifications, and video calling
  */
 export default function ChatPage() {
-    console.log('[ChatPage Render] Component rendering...'); // ADDED: Log every render
+    console.log('[ChatPage Render] Component rendering...');
 
     // Room and user state
     const [roomState, setRoomState] = useState<RoomState>({
@@ -31,8 +31,8 @@ export default function ChatPage() {
     const [typingUser, setTypingUser] = useState<string | undefined>();
     const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
-    // Hooks
-    const { socket, isConnected: socketIsConnected, connectionError } = useSocket();
+    // Hooks - useSocket now gets its value from context
+    const { socket, isConnected: socketIsConnected, connectionError, joinRoom, leaveRoom, sendMessage, sendTypingStatus, on } = useSocket();
     const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
 
     /**
@@ -92,9 +92,9 @@ export default function ChatPage() {
         }));
         console.log('[ChatPage] Room state reset for new join attempt.');
 
-        socket.joinRoom(roomId, username);
+        joinRoom(roomId, username); // Use joinRoom from context
         console.log('[ChatPage] Emitted join-room event.');
-    }, [socket, socketIsConnected, addNotification]);
+    }, [socket, socketIsConnected, joinRoom, addNotification]); // Added joinRoom to dependencies
 
     /**
      * Leave the current room
@@ -102,7 +102,7 @@ export default function ChatPage() {
     const handleLeaveRoom = useCallback(() => {
         console.log(`[ChatPage] handleLeaveRoom called. Current room: ${roomState.roomId}, user: ${roomState.username}`);
         if (roomState.roomId && roomState.username && socket) {
-            socket.leaveRoom(roomState.roomId, roomState.username);
+            leaveRoom(roomState.roomId, roomState.username); // Use leaveRoom from context
             console.log('[ChatPage] Emitted leave-room event.');
         }
 
@@ -123,7 +123,7 @@ export default function ChatPage() {
         console.log('[ChatPage] Resetting all chat states to initial, opening modal.');
 
         addNotification('info', 'Left Room', 'You have left the chat room');
-    }, [roomState, socket, webRTC, addNotification]);
+    }, [roomState, socket, leaveRoom, webRTC, addNotification]); // Added leaveRoom to dependencies
 
     /**
      * Send a message
@@ -134,7 +134,7 @@ export default function ChatPage() {
             return;
         }
 
-        socket.sendMessage({
+        sendMessage({ // Use sendMessage from context
             roomId: message.roomId,
             sender: message.sender,
             content: message.content,
@@ -142,25 +142,25 @@ export default function ChatPage() {
             messageType: message.messageType
         });
         console.log(`[ChatPage] Sent message: ${message.content?.substring(0, 20)}...`);
-    }, [roomState.isConnected, socket, addNotification]);
+    }, [roomState.isConnected, socket, sendMessage, addNotification]); // Added sendMessage to dependencies
 
     /**
      * Handle typing start
      */
     const handleTypingStart = useCallback(() => {
         if (roomState.isConnected && socket) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, true);
+            sendTypingStatus(roomState.roomId, roomState.username, true); // Use sendTypingStatus from context
         }
-    }, [roomState, socket]);
+    }, [roomState, socket, sendTypingStatus]); // Added sendTypingStatus to dependencies
 
     /**
      * Handle typing stop
      */
     const handleTypingStop = useCallback(() => {
         if (roomState.isConnected && socket) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, false);
+            sendTypingStatus(roomState.roomId, roomState.username, false); // Use sendTypingStatus from context
         }
-    }, [roomState, socket]);
+    }, [roomState, socket, sendTypingStatus]); // Added sendTypingStatus to dependencies
 
     const handleStartVideoCall = useCallback(() => {
         if (!roomState.isConnected) {
@@ -200,7 +200,7 @@ export default function ChatPage() {
         console.log('[ChatPage useEffect] Socket IS ready, setting up listeners.');
 
         // Room joined successfully
-        const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
+        const unsubscribeRoomJoined = on('room-joined', (data: { roomId: string; participants: string[] }) => {
             console.log(`[Frontend] Room joined successfully event received. Data:`, data);
             console.log(`[Frontend] Before setting isRoomModalOpen to false, it was: ${isRoomModalOpen}`);
 
@@ -231,7 +231,7 @@ export default function ChatPage() {
         });
 
         // Listen for incoming messages
-        const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
+        const unsubscribeMessageReceived = on('message-received', (message: ChatMessage) => {
             console.log('[Frontend] Message received:', message);
             const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
 
@@ -247,7 +247,7 @@ export default function ChatPage() {
         });
 
         // Listen for participant joined events
-        const unsubscribeParticipantJoined = socket.on('participant-joined', (data: { username: string; roomId: string; participants: string[] }) => {
+        const unsubscribeParticipantJoined = on('participant-joined', (data: { username: string; roomId: string; participants: string[] }) => {
             console.log('[Frontend] Participant joined:', data);
             setRoomState(prev => ({
                 ...prev,
@@ -257,7 +257,7 @@ export default function ChatPage() {
         });
 
         // Listen for participant left events
-        const unsubscribeParticipantLeft = socket.on('participant-left', (data: { username: string; roomId: string; participants: string[] }) => {
+        const unsubscribeParticipantLeft = on('participant-left', (data: { username: string; roomId: string; participants: string[] }) => {
             console.log('[Frontend] Participant left:', data);
             setRoomState(prev => ({
                 ...prev,
@@ -267,7 +267,7 @@ export default function ChatPage() {
         });
 
         // Listen for typing status updates
-        const unsubscribeTypingStatus = socket.on('typing-status', (data: { username: string; isTyping: boolean }) => {
+        const unsubscribeTypingStatus = on('typing-status', (data: { username: string; isTyping: boolean }) => {
             if (data.isTyping && data.username !== roomState.username) {
                 setTypingUser(data.username);
             } else {
@@ -276,7 +276,7 @@ export default function ChatPage() {
         });
 
         // Listen for message history (when joining a room)
-        const unsubscribeRoomHistory = socket.on('message-history', (data: { messages: ChatMessage[] }) => {
+        const unsubscribeRoomHistory = on('message-history', (data: { messages: ChatMessage[] }) => {
             console.log('[Frontend] Message history received:', data.messages);
             const historyMessages = data.messages.map(msg => ({
                 ...msg,
@@ -289,7 +289,7 @@ export default function ChatPage() {
         });
 
         // Listen for general socket errors
-        const unsubscribeError = socket.on('error', (error: { message: string }) => {
+        const unsubscribeError = on('error', (error: { message: string }) => {
             console.error('[Frontend] Socket error:', error);
             addNotification('error', 'Socket Error', error.message);
             setIsConnecting(false);
@@ -299,7 +299,7 @@ export default function ChatPage() {
         // Cleanup function: unsubscribe from all socket events when component unmounts
         return () => {
             console.log('[ChatPage useEffect] Cleaning up socket listeners.');
-            if (socket) {
+            if (socket) { // Check if socket exists before calling off
                 unsubscribeRoomJoined();
                 unsubscribeMessageReceived();
                 unsubscribeParticipantJoined();
@@ -309,7 +309,7 @@ export default function ChatPage() {
                 unsubscribeError();
             }
         };
-    }, [socket, socketIsConnected, roomState.username, addNotification]); // REMOVED: isRoomModalOpen from dependencies
+    }, [socket, socketIsConnected, roomState.username, addNotification, on]); // Added 'on' to dependencies
 
     // Rendered UI
     return (
