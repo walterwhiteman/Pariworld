@@ -62,6 +62,7 @@ export default function ChatPage() {
 
     /**
      * Generate a unique message ID (for temporary client-side use before DB assigns one)
+     * This is primarily for system messages or if optimistic updates are re-introduced carefully.
      */
     const generateClientMessageId = (): string => {
         return `client_msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -130,7 +131,9 @@ export default function ChatPage() {
             return;
         }
 
-        // NEW LOGIC (Simpler: Rely only on 'message-received' event from server to add message)
+        // --- FIX FOR DOUBLE MESSAGES: ONLY EMIT, DO NOT ADD TO LOCAL STATE HERE ---
+        // The message will be added to the state when the 'message-received' event
+        // comes back from the server (for all clients, including the sender).
         socket.sendMessage({
             roomId: message.roomId,
             sender: message.sender,
@@ -168,10 +171,7 @@ export default function ChatPage() {
         // IMPORTANT FOR 1-ON-1: You MUST replace 'OTHER_USER_USERNAME_HERE'
         // with the actual username of another user logged into the same room
         // for this to work. This is a temporary hardcode for testing.
-        const userToCall = 'Chandra'; // <--- REPLACE THIS!
-
-        // console.log('Current room participants:', roomState.participants); // Moved to UI for debugging
-        // console.log('Attempting to call user:', userToCall); // Moved to UI for debugging
+        const userToCall = 'OTHER_USER_USERNAME_HERE'; // <--- REPLACE THIS!
 
         if (!userToCall || userToCall === roomState.username) {
             addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
@@ -184,7 +184,7 @@ export default function ChatPage() {
         }
 
         webRTC.startCall(userToCall);
-        console.log(`Attempting to call: ${userToCall}`); // Keep this for general log
+        console.log(`Attempting to call: ${userToCall}`);
         addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
 
     }, [roomState, webRTC, addNotification]);
@@ -199,7 +199,7 @@ export default function ChatPage() {
 
         // Room joined successfully
         const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
-            console.log('Room joined successfully:', data);
+            console.log('[Frontend] Room joined successfully:', data);
 
             setRoomState(prev => ({
                 ...prev,
@@ -215,196 +215,4 @@ export default function ChatPage() {
                 id: generateClientMessageId(), // Use client-side ID for system messages
                 roomId: data.roomId,
                 sender: 'System',
-                content: 'You joined the chat',
-                messageType: 'system',
-                timestamp: new Date()
-            };
-
-            setRoomState(prev => ({
-                ...prev,
-                messages: [...prev.messages, systemMessage]
-            }));
-        });
-
-        // Message History Received
-        const unsubscribeMessageHistory = socket.on('message-history', (payload: { roomId: string; messages: ChatMessage[] }) => {
-            console.log('Received message history:', payload.messages.length, 'messages');
-            const historyMessages = payload.messages.map(msg => ({
-                ...msg,
-                timestamp: new Date(msg.timestamp) // Ensure Date object
-            }));
-            setRoomState(prev => ({
-                ...prev,
-                messages: historyMessages // Set messages from history
-            }));
-        });
-
-        // User left room
-        const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
-            console.log('User left room:', data);
-
-            if (data.username !== roomState.username) {
-                setRoomState(prev => ({
-                    ...prev,
-                    participants: prev.participants.filter(p => p !== data.username)
-                }));
-
-                // Add system message for other users if they leave
-                const systemMessage: ChatMessage = {
-                    id: generateClientMessageId(), // Use client-side ID for system messages
-                    roomId: data.roomId,
-                    sender: 'System',
-                    content: `${data.username} left the chat`,
-                    messageType: 'system',
-                    timestamp: new Date()
-                };
-
-                setRoomState(prev => ({
-                    ...prev,
-                    messages: [...prev.messages, systemMessage]
-                }));
-            }
-        });
-
-        // Message received
-        const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
-            console.log('Message received:', message);
-
-            // Ensure message timestamp is a Date object if coming from server as ISO string
-            const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
-
-            // IMPORTANT: With the new handleSendMessage, we always add.
-            // If you later implement robust optimistic updates, this logic will need to
-            // intelligently replace/update a temp message instead of adding a new one.
-            setRoomState(prev => ({
-                ...prev,
-                messages: [...prev.messages, parsedMessage]
-            }));
-        });
-
-        // User typing
-        const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
-            console.log('User typing:', data);
-
-            if (data.username !== roomState.username) {
-                setTypingUser(data.isTyping ? data.username : undefined);
-            }
-        });
-
-        // Connection status
-        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
-            console.log('Connection status:', data);
-
-            setRoomState(prev => ({
-                ...prev,
-                isConnected: data.connected,
-                participants: prev.participants // Keep current participants, this event is more for general status
-            }));
-        });
-
-        // Error handling
-        const unsubscribeError = socket.on('error', (data: { message: string }) => {
-            console.error('Socket error:', data);
-
-            addNotification('error', 'Error', data.message);
-            setIsConnecting(false);
-        });
-
-        // Cleanup function
-        return () => {
-            unsubscribeRoomJoined();
-            unsubscribeMessageHistory();
-            unsubscribeRoomLeft();
-            unsubscribeMessageReceived();
-            unsubscribeUserTyping();
-            unsubscribeConnectionStatus();
-            unsubscribeError();
-        };
-    }, [socket, roomState.username, roomState.participants, addNotification]);
-
-    /**
-     * Handle connection errors
-     */
-    useEffect(() => {
-        if (socket.connectionError) {
-            addNotification('error', 'Connection Failed', socket.connectionError);
-            setIsConnecting(false);
-        }
-    }, [socket.connectionError, addNotification]);
-
-    // Added console.log for debugging
-    console.log("ChatPage component is rendering!");
-
-    return (
-        <div className="flex h-screen flex-col bg-gray-50">
-            {/* Room Join Modal */}
-            <RoomJoinModal
-                isOpen={isRoomModalOpen}
-                onJoinRoom={handleJoinRoom}
-                isConnecting={isConnecting}
-            />
-
-            {/* Main Chat Interface */}
-            {!isRoomModalOpen && (
-                <>
-                    {/* Temporary Debugging Display */}
-                    <div className="p-2 bg-yellow-100 text-yellow-800 text-xs font-mono">
-                        **DEBUG INFO (REMOVE LATER):**<br/>
-                        Current User: {roomState.username}<br/>
-                        Room ID: {roomState.roomId}<br/>
-                        Connected: {roomState.isConnected ? 'Yes' : 'No'}<br/>
-                        Participants: [{roomState.participants.join(', ')}]<br/>
-                        Calling Target: OTHER_USER_USERNAME_HERE (replace this in code!)
-                    </div>
-                    {/* End Temporary Debugging Display */}
-
-                    {/* Chat Header */}
-                    {/* IMPORTANT: The onStartVideoCall handler is set here to initiate a 1-on-1 call for testing. */}
-                    {/* Remember to replace 'OTHER_USER_USERNAME_HERE' in handleStartVideoCall with a real username. */}
-                    <ChatHeader
-                        roomId={roomState.roomId}
-                        isConnected={roomState.isConnected}
-                        participantCount={roomState.participants.length}
-                        onStartVideoCall={handleStartVideoCall}
-                        onLeaveRoom={handleLeaveRoom}
-                    />
-
-                    {/* Chat Messages */}
-                    <ChatMessages
-                        messages={roomState.messages}
-                        currentUsername={roomState.username}
-                        typingUser={typingUser}
-                    />
-
-                    {/* Message Input */}
-                    <MessageInput
-                        onSendMessage={handleSendMessage}
-                        onTypingStart={handleTypingStart}
-                        onTypingStop={handleTypingStop}
-                        roomId={roomState.roomId}
-                        username={roomState.username}
-                        disabled={!roomState.isConnected}
-                    />
-                </>
-            )}
-
-            {/* Video Call Modal */}
-            <VideoCallModal
-                isOpen={webRTC.callState.isActive}
-                callState={webRTC.callState}
-                localVideoRef={webRTC.localVideoRef}
-                remoteVideoRef={webRTC.remoteVideoRef}
-                onEndCall={webRTC.endCall}
-                onToggleVideo={webRTC.toggleVideo}
-                onToggleAudio={webRTC.toggleAudio}
-                formatCallDuration={webRTC.formatCallDuration}
-            />
-
-            {/* Notifications */}
-            <NotificationToast
-                notifications={notifications}
-                onDismiss={dismissNotification}
-            />
-        </div>
-    );
-}
+                content:
