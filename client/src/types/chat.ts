@@ -6,7 +6,7 @@ export interface ChatMessage {
     content?: string;
     imageData?: string;
     messageType: 'text' | 'image' | 'system';
-    timestamp: Date;
+    timestamp: string; // MODIFIED: Changed to string to match toISOString()
     isSelf?: boolean;
 }
 
