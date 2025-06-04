@@ -1,57 +1,23 @@
+// server/src/db.ts
+
+import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import pg from 'pg'; // <--- MODIFIED: Import the default export
-const { Pool } = pg; // <--- NEW LINE: Destructure Pool from the default export
+import * as schema from '../shared/schema'; // Import your Drizzle schema
 
-import * as schema from '@shared/schema'; // Assuming your schema definitions are here
-
-// Ensure the DATABASE_URL environment variable is set
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  console.error('*** DATABASE_ERROR: DATABASE_URL environment variable is not set. ***');
-  throw new Error('DATABASE_URL is not set. Cannot connect to database.');
+    throw new Error('DATABASE_URL environment variable is not set.');
 }
 
-let pool: pg.Pool; // <--- MODIFIED: Use pg.Pool type here as 'Pool' is now destructured
-try {
-  console.log('*** DATABASE: Attempting to create PostgreSQL connection pool... ***');
-  pool = new Pool({
+const pool = new Pool({
     connectionString: connectionString,
-    // Optional: Add ssl configuration for Neon if needed, though Render often handles it
-    // ssl: {
-    //   rejectUnauthorized: false // Use with caution; for local testing or if Render's proxy requires it
-    // }
-  });
-  console.log('*** DATABASE: PostgreSQL connection pool created. ***');
-
-  // Test the connection immediately
-  pool.on('error', (err) => {
-    console.error('*** DATABASE_POOL_ERROR: Unexpected error on idle client ***', err);
-    // process.exit(-1); // Consider exiting if a critical error occurs
-  });
-
-  // Verify connection by making a dummy query
-  (async () => {
-    try {
-      console.log('*** DATABASE: Testing connection with a dummy query... ***');
-      await pool.query('SELECT 1');
-      console.log('*** DATABASE: Connection to PostgreSQL successful! ***');
-    } catch (testError) {
-      console.error('*** DATABASE_CONNECTION_FAILED: Could not connect to PostgreSQL. ***', testError);
-      if (testError instanceof Error) {
-        console.error('*** DATABASE_CONNECTION_FAILED STACK: ***', testError.stack);
-      }
-      throw testError; // Re-throw to prevent server from starting without DB
+    ssl: {
+        rejectUnauthorized: false
     }
-  })();
+});
 
-} catch (error) {
-  console.error('*** DATABASE_INITIALIZATION_ERROR: Failed to initialize PostgreSQL pool. ***', error);
-  if (error instanceof Error) {
-    console.error('*** DATABASE_INITIALIZATION_ERROR STACK: ***', error.stack);
-  }
-  throw error; // Re-throw to prevent server startup
-}
+// Initialize Drizzle ORM with the PostgreSQL pool and schema
+export const db = drizzle(pool, { schema });
 
-export const db = drizzle(pool, { schema }); // Initialize Drizzle ORM
-console.log('*** DATABASE: Drizzle ORM client initialized. ***');
+console.log('[DB] Drizzle ORM initialized.');
