@@ -1,8 +1,8 @@
-// src/index.ts (Refactored Code - MODIFIED)
+// src/index.ts (Refactored Code - MODIFIED with types)
 
 import express, { type Request, Response, NextFunction } from "express";
-import { createServer, type Server as HttpServer } from "http"; // Import HttpServer type
-import { Server as SocketIOServer } from 'socket.io'; // Import SocketIOServer
+import { createServer, type Server as HttpServer } from "http";
+import { Server as SocketIOServer } from 'socket.io';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
@@ -16,7 +16,7 @@ app.use(express.urlencoded({ extended: false }));
 
 // Ensure CORS is configured for your frontend URL
 app.use(cors({
-    origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: ENSURE THIS MATCHES YOUR FRONTEND URL
+    origin: "https://pariworld.onrender.com",
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
 }));
@@ -48,13 +48,13 @@ function authenticateCleanup(req: Request, res: Response, next: NextFunction) {
     next();
 }
 
-app.use((req, res, next) => {
+app.use((req: Request, res: Response, next: NextFunction) => { // Explicitly type req, res, next
     const start = Date.now();
     const path = req.path;
     let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
     const originalResJson = res.json;
-    res.json = function (bodyJson, ...args) {
+    res.json = function (bodyJson: any, ...args: any[]) { // Explicitly type bodyJson and args
         capturedJsonResponse = bodyJson;
         return originalResJson.apply(res, [bodyJson, ...args]);
     };
@@ -84,15 +84,11 @@ app.use((req, res, next) => {
     const io: SocketIOServer = new SocketIOServer(httpServer, {
         path: '/ws',
         cors: {
-            // MODIFIED: Set the exact frontend origin instead of '*' to allow credentials
             origin: "https://pariworld.onrender.com",
             methods: ["GET", "POST"],
             credentials: true
         },
-        transports: ['websocket', 'polling'],
-        pingInterval: 25000,
-        pingTimeout: 20000,
-        serveClient: false,
+        transports: ['websocket', 'polling']
     });
     console.log('[Backend] HTTP server and Socket.IO server instances created.');
 
