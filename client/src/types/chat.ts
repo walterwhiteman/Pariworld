@@ -23,10 +23,10 @@ export const enum SocketEvents {
     RoomJoined = 'room-joined',
     RoomLeft = 'room-left',
     MessageReceived = 'message-received',
-    TypingStatus = 'typing-status', // Consistent with backend
+    TypingStatus = 'typing-status',
     Error = 'error',
     ConnectionStatus = 'connection-status',
-    MessageHistory = 'message-history', // Added for clarity
+    MessageHistory = 'message-history',
 }
 
 // Room state
@@ -46,26 +46,3 @@ export interface NotificationData {
     message: string;
     duration?: number;
 }
-
-// Removed WebRTC interfaces for debugging
-/*
-export interface VideoCallState {
-    isActive: boolean;
-    isLocalVideoEnabled: boolean;
-    isLocalAudioEnabled: boolean;
-    localStream: MediaStream | null;
-    remoteStream: MediaStream | null;
-    callDuration: number;
-    status: 'idle' | 'calling' | 'incoming' | 'active' | 'ended';
-    callingUser: string | null;
-    isModalOpen: boolean;
-}
-
-export interface WebRTCSignal {
-    type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end' | 'call-accepted' | 'call-rejected' | 'call-hangup';
-    data: any;
-    roomId: string;
-    sender: string;
-    recipient?: string;
-}
-*/
