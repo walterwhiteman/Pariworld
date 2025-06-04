@@ -1,181 +1,216 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import io, { Socket } from 'socket.io-client';
-import { ChatMessage, SocketEvents } from '@/types/chat';
-
-// Define the shape of the context value
-interface SocketContextType {
-    socket: Socket | undefined;
-    isConnected: boolean;
-    connectionError: string | null;
-    emit: (eventName: string, payload: any) => void;
-    on: (eventName: string, handler: Function) => () => void;
-    joinRoom: (roomId: string, username: string) => void;
-    leaveRoom: (roomId: string, username: string) => void;
-    sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
-    sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
-}
-
-// Create the context with an initial undefined value
-const SocketContext = createContext<SocketContextType | undefined>(undefined);
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { ChatMessage, SocketEvents, RoomState } from '@/types/chat';
 
 /**
- * SocketProvider component that initializes and manages the Socket.IO connection
- * Provides the socket instance and its functions to all children components
+ * Custom hook for managing WebSocket connection and Socket.IO-like events
+ * Handles real-time communication for the private chat application
  */
-interface SocketProviderProps {
-    children: ReactNode;
-}
-
-export function SocketProvider({ children }: SocketProviderProps) {
-    const [socket, setSocket] = useState<Socket | undefined>(undefined);
-    const [isConnected, setIsConnected] = useState(false);
-    const [connectionError, setConnectionError] = useState<string | null>(null);
-
-    const BACKEND_URL = 'https://pariworld-backend.onrender.com';
-
-    // This useEffect initializes the Socket.IO client ONLY ONCE when the provider mounts
-    useEffect(() => {
-        console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
-        const socketInstance = io(BACKEND_URL, {
-            path: '/ws',
-            transports: ['polling', 'websocket'], // Prioritize polling
-            withCredentials: true,
-            pingInterval: 30000, // Increased ping interval
-            pingTimeout: 25000,  // Increased ping timeout
-            forceNew: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            randomizationFactor: 0.5
-        });
-
-        socketInstance.on('connect', () => {
-            console.log('[SocketProvider] Socket.IO connected successfully! (Frontend)');
-            setSocket(socketInstance);
-            setIsConnected(true);
-            setConnectionError(null);
-            console.log('[SocketProvider] Socket state set to connected instance.');
-        });
-
-        socketInstance.on('disconnect', (reason) => {
-            console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
-            setIsConnected(false);
-            setSocket(undefined);
-            if (reason === 'io server disconnect') {
-                setConnectionError('Disconnected by server. Attempting to reconnect...');
-                // socketInstance.connect(); // Let Socket.IO's built-in reconnection handle this
-            } else {
-                setConnectionError(`Disconnected: ${reason}`);
-            }
-        });
-
-        socketInstance.on('connect_error', (error) => {
-            console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
-                          error.message,
-                          'Description:', (error as any).description,
-                          'Type:', (error as any).type,
-                          'Event:', (error as any).event,
-                          'Reason:', (error as any).reason,
-                          error.stack);
-            setConnectionError(`Connection failed: ${error.message}`);
-            setIsConnected(false);
-            setSocket(undefined);
-        });
-
-        socketInstance.on('reconnect_attempt', (attemptNumber) => {
-            console.log(`[SocketProvider] Reconnect attempt #${attemptNumber}`);
-            setConnectionError(`Attempting to reconnect... (Attempt ${attemptNumber})`);
-        });
-
-        socketInstance.on('reconnect', (attemptNumber) => {
-            console.log(`[SocketProvider] Reconnected successfully after ${attemptNumber} attempts`);
-            setSocket(socketInstance);
-            setIsConnected(true);
-            setConnectionError(null);
-        });
-
-        socketInstance.on('reconnect_error', (error) => {
-            console.error('[SocketProvider] Reconnect error:', error.message);
-            setConnectionError(`Reconnect failed: ${error.message}`);
-            setSocket(undefined);
-        });
-
-        socketInstance.on('reconnect_failed', () => {
-            console.error('[SocketProvider] Reconnect failed permanently.');
-            setConnectionError('Reconnect failed permanently. Please refresh.');
-            setSocket(undefined);
-        });
-
-        return () => {
-            if (socketInstance) {
-                console.log('[SocketProvider useEffect] Disconnecting Socket.IO client on provider unmount.');
-                socketInstance.offAny();
-                socketInstance.disconnect();
-            }
-        };
-    }, [BACKEND_URL]);
-
-    const emit = useCallback((eventName: string, payload: any) => {
-        if (socket && socket.connected) {
-            socket.emit(eventName, payload);
-            console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
-        } else {
-            console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected or not initialized.`);
-        }
-    }, [socket]);
-
-    const on = useCallback((eventName: string, handler: Function) => {
-        if (socket) {
-            socket.on(eventName, handler);
-        } else {
-            console.warn(`[Socket.on] Socket not yet available when trying to attach '${eventName}' handler.`);
-        }
-        return () => {
-            if (socket) {
-                socket.off(eventName, handler);
-            }
-        };
-    }, [socket]);
-
-    const joinRoom = useCallback((roomId: string, username: string) => {
-        emit(SocketEvents.JoinRoom, { roomId, username });
-    }, [emit]);
-
-    const leaveRoom = useCallback((roomId: string, username: string) => {
-        emit(SocketEvents.LeaveRoom, { roomId, username });
-    }, [emit]);
-
-    const sendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-        emit(SocketEvents.SendMessage, message);
-    }, [emit]);
-
-    const sendTypingStatus = useCallback((roomId: string, username: string, isTyping: boolean) => {
-        emit(isTyping ? SocketEvents.TypingStart : SocketEvents.TypingStop, { roomId, username });
-    }, [emit]);
-
-    const contextValue = {
-        socket,
-        isConnected,
-        connectionError,
-        emit,
-        on,
-        joinRoom,
-        leaveRoom,
-        sendMessage,
-        sendTypingStatus
-    };
-
-    return (
-        <SocketContext.Provider value={contextValue}>
-            {children}
-        </SocketContext.Provider>
-    );
-}
-
 export function useSocket() {
-    const context = useContext(SocketContext);
-    if (context === undefined) {
-        throw new Error('useSocket must be used within a SocketProvider');
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const eventHandlersRef = useRef<Map<string, Set<Function>>>(new Map());
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
+
+  // Define your backend WebSocket URL here
+  // REPLACE 'https://your-backend-name.onrender.com' with your actual Render Backend URL
+  const BACKEND_WS_URL = 'wss://pariworld-backend.onrender.com/ws'; // IMPORTANT: Use wss:// for secure connections
+
+  /**
+   * Initialize WebSocket connection
+   */
+  const connect = useCallback(() => {
+    try {
+      // Use the explicitly defined backend URL
+      // const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"; // No longer needed
+      // const wsUrl = `${protocol}//${window.location.host}/ws`; // No longer needed
+
+      const wsUrl = BACKEND_WS_URL; // <--- Use the constant here
+
+      console.log('Connecting to WebSocket:', wsUrl);
+
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        console.log('WebSocket connected successfully');
+        setIsConnected(true);
+        setConnectionError(null);
+        reconnectAttemptsRef.current = 0;
+
+        // Emit connection established event
+        emit('connection-established', {});
+      };
+
+      socket.onclose = (event) => {
+        console.log('WebSocket connection closed:', event.code, event.reason);
+        setIsConnected(false);
+        socketRef.current = null;
+
+        // Attempt to reconnect if not a normal closure
+        if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
+          console.log(`Attempting to reconnect in ${delay}ms... (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
+
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectAttemptsRef.current++;
+            connect();
+          }, delay);
+        } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          setConnectionError('Unable to connect to chat server. Please refresh the page.');
+        }
+      };
+
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setConnectionError('Connection error occurred');
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const { event: eventName, payload } = data;
+
+          // Emit the received event to all registered handlers
+          const handlers = eventHandlersRef.current.get(eventName);
+          if (handlers) {
+            handlers.forEach(handler => {
+              try {
+                handler(payload);
+              } catch (err) {
+                console.error(`Error in event handler for ${eventName}:`, err);
+              }
+            });
+          }
+        } catch (err) {
+          console.error('Error parsing WebSocket message:', err);
+        }
+      };
+
+    } catch (error) {
+      console.error('Error creating WebSocket connection:', error);
+      setConnectionError('Failed to create connection');
     }
-    return context;
+  }, []);
+
+  /**
+   * Disconnect from WebSocket
+   */
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.close(1000, 'Client disconnecting');
+    }
+
+    setIsConnected(false);
+    socketRef.current = null;
+  }, []);
+
+  /**
+   * Emit an event to the server
+   */
+  const emit = useCallback((eventName: string, payload: any) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      const message = JSON.stringify({
+        event: eventName,
+        payload: payload
+      });
+      socketRef.current.send(message);
+    } else {
+      console.warn('Cannot emit event - WebSocket is not connected:', eventName);
+    }
+  }, []);
+
+  /**
+   * Register an event handler
+   */
+  const on = useCallback((eventName: string, handler: Function) => {
+    if (!eventHandlersRef.current.has(eventName)) {
+      eventHandlersRef.current.set(eventName, new Set());
+    }
+    eventHandlersRef.current.get(eventName)!.add(handler);
+
+    // Return cleanup function
+    return () => {
+      const handlers = eventHandlersRef.current.get(eventName);
+      if (handlers) {
+        handlers.delete(handler);
+        if (handlers.size === 0) {
+          eventHandlersRef.current.delete(eventName);
+        }
+      }
+    };
+  }, []);
+
+  /**
+   * Remove an event handler
+   */
+  const off = useCallback((eventName: string, handler: Function) => {
+    const handlers = eventHandlersRef.current.get(eventName);
+    if (handlers) {
+      handlers.delete(handler);
+      if (handlers.size === 0) {
+        eventHandlersRef.current.delete(eventName);
+      }
+    }
+  }, []);
+
+  /**
+   * Join a chat room
+   */
+  const joinRoom = useCallback((roomId: string, username: string) => {
+    emit('join-room', { roomId, username });
+  }, [emit]);
+
+  /**
+   * Leave a chat room
+   */
+  const leaveRoom = useCallback((roomId: string, username: string) => {
+    emit('leave-room', { roomId, username });
+  }, [emit]);
+
+  /**
+   * Send a message
+   */
+  const sendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+    emit('send-message', message);
+  }, [emit]);
+
+  /**
+   * Send typing status
+   */
+  const sendTypingStatus = useCallback((roomId: string, username: string, isTyping: boolean) => {
+    emit(isTyping ? 'typing-start' : 'typing-stop', { roomId, username });
+  }, [emit]);
+
+  /**
+   * Initialize connection on mount
+   */
+  useEffect(() => {
+    connect();
+
+    return () => {
+      disconnect();
+    };
+  }, [connect, disconnect]);
+
+  return {
+    isConnected,
+    connectionError,
+    connect,
+    disconnect,
+    emit,
+    on,
+    off,
+    joinRoom,
+    leaveRoom,
+    sendMessage,
+    sendTypingStatus
+  };
 }
