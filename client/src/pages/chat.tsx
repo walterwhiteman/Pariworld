@@ -3,9 +3,10 @@ import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { NotificationToast } from '@/components/chat/NotificationToast'; // VideoCallModal removed
+// import { VideoCallModal } from '@/components/chat/VideoCallModal'; // Removed import for diagnosis
+import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
-// import { useWebRTC } from '@/hooks/useWebRTC'; // REMOVED IMPORT FOR DIAGNOSIS
+// import { useWebRTC } from '@/hooks/useWebRTC'; // Removed import for diagnosis
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
@@ -32,7 +33,7 @@ export default function ChatPage() {
 
     // Hooks - useSocket now gets its value from context
     const { socket, isConnected: socketIsConnected, connectionError, joinRoom, leaveRoom, sendMessage, sendTypingStatus, on } = useSocket();
-    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // REMOVED USAGE FOR DIAGNOSIS
+    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // Removed usage for diagnosis
 
     // Use a ref to store the latest roomState and username for handlers
     const roomStateRef = useRef(roomState);
@@ -111,7 +112,7 @@ export default function ChatPage() {
             console.log('[ChatPage] Emitted leave-room event.');
         }
 
-        // webRTC.endCall(); // REMOVED USAGE FOR DIAGNOSIS
+        // webRTC.endCall(); // Removed usage for diagnosis
 
         setRoomState({
             roomId: '',
@@ -339,7 +340,7 @@ export default function ChatPage() {
                         username={roomState.username}
                         participants={roomState.participants}
                         onLeaveRoom={handleLeaveRoom}
-                        // onStartVideoCall={handleStartVideoCall} // TEMPORARILY REMOVED
+                        // onStartVideoCall={handleStartVideoCall} // Temporarily removed
                     />
                     <ChatMessages
                         messages={roomState.messages}
@@ -357,7 +358,7 @@ export default function ChatPage() {
             )}
 
             {/* Video Call Modal */}
-            {/* <VideoCallModal // TEMPORARILY REMOVED
+            {/* <VideoCallModal // Temporarily removed
                 isOpen={webRTC.callState.isModalOpen}
                 onClose={webRTC.closeCallModal}
                 localStream={webRTC.callState.localStream}
