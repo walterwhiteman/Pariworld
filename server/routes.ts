@@ -1,10 +1,10 @@
-// src/routes.ts (Refactored Code - ALIGNED WITH index.ts)
+// src/routes.ts (Complete Code - MODIFIED with types)
 
-import type { Express } from "express";
-// Removed: createServer, type Server from 'http' as they are no longer created here
-import { Server as SocketIOServer } from 'socket.io'; // Only import SocketIOServer type
+import type { Express, Request, Response } from "express"; // Import Request and Response types
+import { createServer, type Server } from "http";
+import { Server as SocketIOServer, Socket } from 'socket.io'; // Import Socket type
 import { storage } from "./storage";
-import { RoomParticipant } from "@shared/schema"; // Assuming this path is correct
+import { RoomParticipant } from "@shared/schema";
 
 // Define ChatMessage interface for server use (unchanged)
 interface ChatMessage {
@@ -14,7 +14,7 @@ interface ChatMessage {
     content?: string;
     imageData?: string;
     messageType: 'text' | 'image' | 'system';
-    timestamp: Date;
+    timestamp: Date; // Keep as Date object on backend for DB operations
 }
 
 interface ConnectedClientInfo {
@@ -22,20 +22,14 @@ interface ConnectedClientInfo {
     username: string;
 }
 
-const usernameToSocketIdMap = new Map<string, string>(); // username -> socket.id
+const usernameToSocketIdMap = new Map<string, string>();
 
-/**
- * Register HTTP routes and WebSocket server event handlers for the private chat application
- * Now accepts the Socket.IO server instance as an argument.
- */
-// MODIFIED: Function signature to accept 'io' and return void
-export async function registerRoutes(app: Express, io: SocketIOServer): Promise<void> {
-    // --- HTTP Routes (unchanged) ---
-    app.get('/api/health', (req, res) => {
+export async function registerRoutes(app: Express, io: SocketIOServer): Promise<{ httpServer: Server, io: SocketIOServer }> {
+    app.get('/api/health', (req: Request, res: Response) => { // Explicitly type req, res
         res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    app.get('/api/rooms/:roomId', async (req, res) => {
+    app.get('/api/rooms/:roomId', async (req: Request, res: Response) => { // Explicitly type req, res
         try {
             const { roomId } = req.params;
             const onlineParticipants = getRoomParticipants(roomId);
@@ -51,13 +45,10 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
         }
     });
 
-    // --- REMOVED: No longer create httpServer or io here ---
-    // const httpServer = createServer(app);
-    // const io = new SocketIOServer(httpServer, { /* ... */ });
+    const httpServer = createServer(app);
 
-    console.log('[Backend Socket.IO] Socket.IO server instance received in registerRoutes.');
+    console.log('[Backend Socket.IO] Socket.IO server instance created.');
 
-    // Helper functions (now using the 'io' instance passed as an argument)
     const getRoomParticipantCount = (roomId: string): number => {
         return io.sockets.adapter.rooms.get(roomId)?.size || 0;
     };
@@ -81,8 +72,7 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
         return `temp_msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     };
 
-    // --- Socket.IO Connection Handling ---
-    io.on('connection', (socket) => {
+    io.on('connection', (socket: Socket) => { // Explicitly type socket
         console.log(`[Backend Socket.IO] New Socket.IO connection established: ${socket.id} from ${socket.handshake.address}`);
 
         socket.emit('connection-established', { connected: true });
@@ -181,7 +171,7 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
             }
         });
 
-        socket.on('send-message', async (messageData: { content?: string, imageData?: string, messageType?: 'text' | 'image' | 'system' }) => {
+        socket.on('send-message', async (messageData: { content?: string, imageData?: string, messageType?: 'text' | 'image' | 'system' }) => { // Explicitly type messageData
             console.log(`[Backend Socket.IO] Received send-message from ${socket.data.username} in room ${socket.data.roomId}`);
             const { roomId, username } = socket.data;
 
@@ -253,7 +243,7 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
             }
         });
 
-        socket.on('disconnect', async (reason) => {
+        socket.on('disconnect', async (reason: string) => { // Explicitly type reason
             console.log(`[Backend Socket.IO] Socket.IO connection closed: ${socket.id}. Reason: ${reason}`);
 
             const disconnectedUsername = socket.data.username;
@@ -269,7 +259,7 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
                     await storage.removeRoomParticipant(disconnectedRoomId, disconnectedUsername);
                     console.log(`[Backend Socket.IO] Marked ${disconnectedUsername} as inactive in DB for room ${disconnectedRoomId}.`);
                 } catch (error) {
-                    console.error('[Backend Socket.IO] Error removing room participant:', error);
+                    console.error('[Backend Socket.IO] Error removing room participant on disconnect:', error);
                 }
 
                 io.to(disconnectedRoomId).emit('participant-left', {
@@ -293,7 +283,6 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
 
     console.log('[Backend Socket.IO] Socket.IO server initialized and listening for connections.');
 
-    // --- Message Cleanup Cron Job (Moved from index.ts to here for clarity) ---
     const cleanupInterval = setInterval(async () => {
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         try {
@@ -305,9 +294,10 @@ export async function registerRoutes(app: Express, io: SocketIOServer): Promise<
         }
     }, 60 * 60 * 1000);
 
-    // Removed: No longer need to clear interval on httpServer close here, as httpServer is not managed here
-    // httpServer.on('close', () => { clearInterval(cleanupInterval); });
+    httpServer.on('close', () => {
+        clearInterval(cleanupInterval);
+        console.log('[Backend Socket.IO] Message cleanup interval cleared on HTTP server close.');
+    });
 
-    // Removed: No longer return httpServer, io as they are passed in
-    // return { httpServer, io };
+    return { httpServer, io };
 }
