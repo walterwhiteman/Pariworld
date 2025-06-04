@@ -1,168 +1,98 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Lock, MessageCircle } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useState, useRef, useEffect } from "react";
 
 interface RoomJoinModalProps {
-  isOpen: boolean;
-  onJoinRoom: (roomId: string, username: string) => void;
-  isConnecting?: boolean;
+    isOpen: boolean;
+    onJoin: (roomId: string, username: string) => void;
+    isConnecting: boolean;
 }
 
 /**
- * Modal component for users to enter room ID and username to join a private chat
- * Implements the room-based authentication system for two-person chats
+ * Modal for users to enter a room ID and username to join a chat.
  */
-export function RoomJoinModal({ isOpen, onJoinRoom, isConnecting = false }: RoomJoinModalProps) {
-  const [roomId, setRoomId] = useState('');
-  const [username, setUsername] = useState('');
-  const [errors, setErrors] = useState<{ roomId?: string; username?: string }>({});
+export function RoomJoinModal({ isOpen, onJoin, isConnecting }: RoomJoinModalProps) {
+    const [roomId, setRoomId] = useState("");
+    const [username, setUsername] = useState("");
+    const usernameInputRef = useRef<HTMLInputElement>(null); // Ref for username input
 
-  /**
-   * Validate form inputs
-   */
-  const validateForm = (): boolean => {
-    const newErrors: { roomId?: string; username?: string } = {};
+    // Focus on the username input when the modal opens
+    useEffect(() => {
+        if (isOpen && usernameInputRef.current) {
+            usernameInputRef.current.focus();
+        }
+    }, [isOpen]);
 
-    if (!roomId.trim()) {
-      newErrors.roomId = 'Room ID is required';
-    } else if (roomId.length < 3) {
-      newErrors.roomId = 'Room ID must be at least 3 characters';
-    }
+    const handleJoinClick = () => {
+        if (roomId.trim() && username.trim()) {
+            onJoin(roomId.trim(), username.trim());
+        }
+    };
 
-    if (!username.trim()) {
-      newErrors.username = 'Username is required';
-    } else if (username.length < 2) {
-      newErrors.username = 'Username must be at least 2 characters';
-    } else if (username.length > 20) {
-      newErrors.username = 'Username must be less than 20 characters';
-    }
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+            handleJoinClick();
+        }
+    };
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  /**
-   * Handle form submission
-   */
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (validateForm()) {
-      onJoinRoom(roomId.trim(), username.trim());
-    }
-  };
-
-  /**
-   * Handle input changes and clear related errors
-   */
-  const handleRoomIdChange = (value: string) => {
-    setRoomId(value);
-    if (errors.roomId) {
-      setErrors(prev => ({ ...prev, roomId: undefined }));
-    }
-  };
-
-  const handleUsernameChange = (value: string) => {
-    setUsername(value);
-    if (errors.username) {
-      setErrors(prev => ({ ...prev, username: undefined }));
-    }
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md" hideCloseButton>
-        <DialogHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-600">
-            <MessageCircle className="h-8 w-8 text-white" />
-          </div>
-          <DialogTitle className="text-2xl font-semibold text-gray-900">
-            Join Private Chat
-          </DialogTitle>
-          <p className="text-gray-600">
-            Enter a shared room ID and your name to start chatting privately
-          </p>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Room ID Input */}
-          <div className="space-y-2">
-            <Label htmlFor="roomId" className="text-sm font-medium text-gray-700">
-              <Lock className="mr-2 inline h-4 w-4" />
-              Room ID / Passcode
-            </Label>
-            <Input
-              id="roomId"
-              type="text"
-              placeholder="Enter shared room ID..."
-              value={roomId}
-              onChange={(e) => handleRoomIdChange(e.target.value)}
-              className={`transition-all ${
-                errors.roomId 
-                  ? 'border-red-500 focus:ring-red-500' 
-                  : 'focus:ring-blue-500'
-              }`}
-              disabled={isConnecting}
-              autoFocus
-            />
-            {errors.roomId && (
-              <p className="text-sm text-red-600">{errors.roomId}</p>
-            )}
-          </div>
-
-          {/* Username Input */}
-          <div className="space-y-2">
-            <Label htmlFor="username" className="text-sm font-medium text-gray-700">
-              Your Name
-            </Label>
-            <Input
-              id="username"
-              type="text"
-              placeholder="Enter your name..."
-              value={username}
-              onChange={(e) => handleUsernameChange(e.target.value)}
-              className={`transition-all ${
-                errors.username 
-                  ? 'border-red-500 focus:ring-red-500' 
-                  : 'focus:ring-blue-500'
-              }`}
-              disabled={isConnecting}
-              maxLength={20}
-            />
-            {errors.username && (
-              <p className="text-sm text-red-600">{errors.username}</p>
-            )}
-          </div>
-
-          {/* Join Button */}
-          <Button
-            type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 focus:ring-blue-500"
-            disabled={isConnecting}
-          >
-            {isConnecting ? (
-              <>
-                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Connecting...
-              </>
-            ) : (
-              'Join Chat Room'
-            )}
-          </Button>
-        </form>
-
-        {/* Instructions */}
-        <div className="mt-6 text-center">
-          <p className="text-xs text-gray-500">
-            Share the same Room ID with your chat partner to connect privately.
-            <br />
-            No registration required - just enter and start chatting!
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+    return (
+        <Dialog open={isOpen} onOpenChange={() => { /* Prevent closing from outside */ }}>
+            <DialogContent className="sm:max-w-[425px] rounded-lg shadow-xl p-6 bg-white" hideCloseButton> {/* Pass hideCloseButton directly */}
+                <DialogHeader>
+                    <DialogTitle className="text-2xl font-bold text-gray-800">Join Chat Room</DialogTitle>
+                    <DialogDescription className="text-gray-600">
+                        Enter a Room ID and your Username to start chatting.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="roomId" className="text-right text-gray-700">
+                            Room ID
+                        </Label>
+                        <Input
+                            id="roomId"
+                            value={roomId}
+                            onChange={(e) => setRoomId(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            className="col-span-3 rounded-md border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200"
+                            disabled={isConnecting}
+                        />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="username" className="text-right text-gray-700">
+                            Username
+                        </Label>
+                        <Input
+                            id="username"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            ref={usernameInputRef}
+                            className="col-span-3 rounded-md border-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-200"
+                            disabled={isConnecting}
+                        />
+                    </div>
+                </div>
+                <DialogFooter className="flex justify-end">
+                    <Button
+                        type="submit"
+                        onClick={handleJoinClick}
+                        disabled={!roomId.trim() || !username.trim() || isConnecting}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md shadow-md transition duration-200"
+                    >
+                        {isConnecting ? "Connecting..." : "Join Room"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
 }
