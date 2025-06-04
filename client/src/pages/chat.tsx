@@ -3,7 +3,6 @@ import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
-// import { VideoCallModal } from '@/components/chat/VideoCallModal'; // Removed import for diagnosis
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
 // import { useWebRTC } from '@/hooks/useWebRTC'; // Removed import for diagnosis
@@ -167,20 +166,21 @@ export default function ChatPage() {
     }, [roomState, socket, sendTypingStatus]);
 
     const handleStartVideoCall = useCallback(() => {
-        if (!roomState.isConnected) {
-            addNotification('error', 'Call Error', 'Not connected to room.');
-            return;
-        }
+        addNotification('info', 'Feature Disabled', 'Video call is temporarily disabled for debugging.');
+        // if (!roomState.isConnected) {
+        //     addNotification('error', 'Call Error', 'Not connected to room.');
+        //     return;
+        // }
 
-        const userToCall = 'OTHER_USER_USERNAME_HERE';
+        // const userToCall = 'OTHER_USER_USERNAME_HERE';
 
-        if (!userToCall || userToCall === roomState.username) {
-            addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
-            return;
-        }
+        // if (!userToCall || userToCall === roomState.username) {
+        //     addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
+        //     return;
+        // }
 
-        console.log(`[ChatPage] Attempting to call: ${userToCall}`);
-        addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
+        // console.log(`[ChatPage] Attempting to call: ${userToCall}`);
+        // addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
 
     }, [roomState, addNotification]);
 
@@ -340,7 +340,7 @@ export default function ChatPage() {
                         username={roomState.username}
                         participants={roomState.participants}
                         onLeaveRoom={handleLeaveRoom}
-                        // onStartVideoCall={handleStartVideoCall} // Temporarily removed
+                        onStartVideoCall={handleStartVideoCall} // Still pass the handler, but it's now a no-op
                     />
                     <ChatMessages
                         messages={roomState.messages}
@@ -357,8 +357,8 @@ export default function ChatPage() {
                 </>
             )}
 
-            {/* Video Call Modal */}
-            {/* <VideoCallModal // Temporarily removed
+            {/* Video Call Modal (REMOVED FOR DIAGNOSIS) */}
+            {/* <VideoCallModal
                 isOpen={webRTC.callState.isModalOpen}
                 onClose={webRTC.closeCallModal}
                 localStream={webRTC.callState.localStream}
