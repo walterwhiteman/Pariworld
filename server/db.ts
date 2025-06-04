@@ -1,5 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import pg from 'pg'; // <--- MODIFIED: Import the default export
+const { Pool } = pg; // <--- NEW LINE: Destructure Pool from the default export
+
 import * as schema from '@shared/schema'; // Assuming your schema definitions are here
 
 // Ensure the DATABASE_URL environment variable is set
@@ -7,12 +9,10 @@ const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
   console.error('*** DATABASE_ERROR: DATABASE_URL environment variable is not set. ***');
-  // In a real app, you might want to exit the process or handle this more gracefully.
-  // For now, we'll throw to make sure it's caught during startup.
   throw new Error('DATABASE_URL is not set. Cannot connect to database.');
 }
 
-let pool: Pool;
+let pool: pg.Pool; // <--- MODIFIED: Use pg.Pool type here as 'Pool' is now destructured
 try {
   console.log('*** DATABASE: Attempting to create PostgreSQL connection pool... ***');
   pool = new Pool({
