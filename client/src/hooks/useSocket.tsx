@@ -38,11 +38,17 @@ export function SocketProvider({ children }: SocketProviderProps) {
         console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
         const socketInstance = io(BACKEND_URL, {
             path: '/ws',
-            transports: ['websocket', 'polling'],
+            // MODIFIED: Prioritize polling first, then websocket
+            transports: ['polling', 'websocket'],
             withCredentials: true,
-            // ADDED: Adjust ping intervals to be more tolerant of network latency
-            pingInterval: 25000,
-            pingTimeout: 20000,
+            // Increased ping intervals to be more tolerant of network latency on Render
+            pingInterval: 30000, // Send ping every 30 seconds
+            pingTimeout: 25000,  // Disconnect if no pong received within 25 seconds
+            forceNew: true, // Always attempt a new connection
+            reconnectionAttempts: 10, // Attempt reconnection 10 times
+            reconnectionDelay: 1000, // Wait 1 second before first reconnection attempt
+            reconnectionDelayMax: 5000, // Max delay between reconnection attempts is 5 seconds
+            randomizationFactor: 0.5 // Randomize reconnection delay
         });
 
         socketInstance.on('connect', () => {
@@ -59,14 +65,20 @@ export function SocketProvider({ children }: SocketProviderProps) {
             setSocket(undefined);
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
-                socketInstance.connect();
+                // socketInstance.connect(); // Let Socket.IO's built-in reconnection handle this
             } else {
                 setConnectionError(`Disconnected: ${reason}`);
             }
         });
 
         socketInstance.on('connect_error', (error) => {
-            console.error('[SocketProvider] Socket.IO connection error! (Frontend):', error.message, error.stack);
+            console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
+                          error.message,
+                          'Description:', (error as any).description, // Type assertion for more details
+                          'Type:', (error as any).type, // Type assertion for more details
+                          'Event:', (error as any).event, // Type assertion for more details
+                          'Reason:', (error as any).reason, // Type assertion for more details
+                          error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
             setIsConnected(false);
             setSocket(undefined);
@@ -74,6 +86,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
         socketInstance.on('reconnect_attempt', (attemptNumber) => {
             console.log(`[SocketProvider] Reconnect attempt #${attemptNumber}`);
+            setConnectionError(`Attempting to reconnect... (Attempt ${attemptNumber})`);
         });
 
         socketInstance.on('reconnect', (attemptNumber) => {
@@ -95,6 +108,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
             setSocket(undefined);
         });
 
+        // Cleanup function for this specific useEffect: disconnects the socket when the provider unmounts
         return () => {
             if (socketInstance) {
                 console.log('[SocketProvider useEffect] Disconnecting Socket.IO client on provider unmount.');
@@ -102,7 +116,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
                 socketInstance.disconnect();
             }
         };
-    }, [BACKEND_URL]);
+    }, [BACKEND_URL]); // Empty dependency array to run only once on mount
 
     const emit = useCallback((eventName: string, payload: any) => {
         if (socket && socket.connected) {
