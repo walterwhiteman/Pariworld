@@ -3,9 +3,8 @@ import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { NotificationToast } from '@/components/chat/NotificationToast'; // VideoCallModal import removed
+import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
-// import { useWebRTC } from '@/hooks/useWebRTC'; // REMOVED: Temporarily remove WebRTC import
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
@@ -32,7 +31,6 @@ export default function ChatPage() {
 
     // Hooks - useSocket now gets its value from context
     const { socket, isConnected: socketIsConnected, connectionError, joinRoom, leaveRoom, sendMessage, sendTypingStatus, on } = useSocket();
-    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // REMOVED: Temporarily remove WebRTC usage
 
     // Use a ref to store the latest roomState and username for handlers
     const roomStateRef = useRef(roomState);
@@ -111,8 +109,6 @@ export default function ChatPage() {
             console.log('[ChatPage] Emitted leave-room event.');
         }
 
-        // webRTC.endCall(); // REMOVED: Temporarily remove WebRTC usage
-
         setRoomState({
             roomId: '',
             username: '',
@@ -165,27 +161,23 @@ export default function ChatPage() {
         }
     }, [roomState, socket, sendTypingStatus]);
 
-    // MODIFIED: handleStartVideoCall now just shows a notification
     const handleStartVideoCall = useCallback(() => {
         addNotification('info', 'Feature Disabled', 'Video call is temporarily disabled for debugging.');
     }, [addNotification]);
 
 
     // Define all event handlers as useCallback functions
+    // Keep these defined for future re-introduction, but they won't be attached below
     const handleRoomJoined = useCallback((data: { roomId: string; participants: string[] }) => {
         console.log(`[Frontend] Room joined successfully event received. Data:`, data);
-        console.log(`[Frontend] Before setting isRoomModalOpen to false, it was: ${isRoomModalOpen}`);
-
         setRoomState(prev => ({
             ...prev,
             isConnected: true,
             participants: data.participants
         }));
-
         setIsRoomModalOpen(false);
         setIsConnecting(false);
-        console.log('[Frontend] isRoomModalOpen set to false, isConnected set to true.');
-
+        addNotification('success', 'Room Joined', `Welcome to ${data.roomId}!`);
         const systemMessage: ChatMessage = {
             id: generateClientMessageId(),
             roomId: data.roomId,
@@ -198,13 +190,11 @@ export default function ChatPage() {
             ...prev,
             messages: [...prev.messages, systemMessage]
         }));
-        addNotification('success', 'Room Joined', `Welcome to ${data.roomId}!`);
-    }, [isRoomModalOpen, generateClientMessageId, addNotification]);
+    }, [generateClientMessageId, addNotification]);
 
     const handleMessageReceived = useCallback((message: ChatMessage) => {
         console.log('[Frontend] Message received:', message);
         const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
-
         setRoomState(prev => ({
             ...prev,
             messages: prev.messages.some(msg => msg.id === parsedMessage.id)
@@ -274,38 +264,18 @@ export default function ChatPage() {
 
         console.log('[ChatPage useEffect] Socket IS ready, setting up listeners.');
 
-        // Log the type of each handler before attaching
-        console.log(`[ChatPage useEffect] Type of handleRoomJoined: ${typeof handleRoomJoined}`);
-        console.log(`[ChatPage useEffect] Type of handleMessageReceived: ${typeof handleMessageReceived}`);
-        console.log(`[ChatPage useEffect] Type of handleParticipantJoined: ${typeof handleParticipantJoined}`);
-        console.log(`[ChatPage useEffect] Type of handleParticipantLeft: ${typeof handleParticipantLeft}`);
-        console.log(`[ChatPage useEffect] Type of handleTypingStatus: ${typeof handleTypingStatus}`);
-        console.log(`[ChatPage useEffect] Type of handleMessageHistory: ${typeof handleMessageHistory}`);
-        console.log(`[ChatPage useEffect] Type of handleError: ${typeof handleError}`);
+        // Log the type of 'on' function before attaching
         console.log(`[ChatPage useEffect] Type of 'on' function from useSocket: ${typeof on}`);
 
-
-        // Attach listeners using the stable useCallback handlers
-        const unsubscribeRoomJoined = on('room-joined', handleRoomJoined);
-        const unsubscribeMessageReceived = on('message-received', handleMessageReceived);
-        const unsubscribeParticipantJoined = on('participant-joined', handleParticipantJoined);
-        const unsubscribeParticipantLeft = on('participant-left', handleParticipantLeft);
-        const unsubscribeTypingStatus = on('typing-status', handleTypingStatus);
-        const unsubscribeRoomHistory = on('message-history', handleMessageHistory);
+        // ATTACH ONLY THE ERROR LISTENER FOR DIAGNOSIS
         const unsubscribeError = on('error', handleError);
 
         // Cleanup function: unsubscribe from all socket events when component unmounts
         return () => {
             console.log('[ChatPage useEffect] Cleaning up socket listeners.');
-            unsubscribeRoomJoined();
-            unsubscribeMessageReceived();
-            unsubscribeParticipantJoined();
-            unsubscribeParticipantLeft();
-            unsubscribeTypingStatus();
-            unsubscribeRoomHistory();
             unsubscribeError();
         };
-    }, [socket, socketIsConnected, on, handleRoomJoined, handleMessageReceived, handleParticipantJoined, handleParticipantLeft, handleTypingStatus, handleMessageHistory, handleError]);
+    }, [socket, socketIsConnected, on, handleError]); // Only 'on' and 'handleError' as dependencies
 
 
     // Rendered UI
@@ -326,7 +296,7 @@ export default function ChatPage() {
                         username={roomState.username}
                         participants={roomState.participants}
                         onLeaveRoom={handleLeaveRoom}
-                        onStartVideoCall={handleStartVideoCall} // This handler now just shows a notification
+                        onStartVideoCall={handleStartVideoCall}
                     />
                     <ChatMessages
                         messages={roomState.messages}
@@ -342,18 +312,6 @@ export default function ChatPage() {
                     />
                 </>
             )}
-
-            {/* Video Call Modal (REMOVED FROM RENDER) */}
-            {/* <VideoCallModal
-                isOpen={webRTC.callState.isModalOpen}
-                onClose={webRTC.closeCallModal}
-                localStream={webRTC.callState.localStream}
-                remoteStream={webRTC.callState.remoteStream}
-                callStatus={webRTC.callState.status}
-                onAcceptCall={webRTC.acceptCall}
-                onEndCall={webRTC.endCall}
-                callingUser={webRTC.callState.callingUser}
-            /> */}
 
             {/* Notification Toasts */}
             <div className="fixed bottom-4 right-4 z-50 space-y-2">
