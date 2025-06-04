@@ -1,44 +1,184 @@
-{
-  "name": "pariworld-frontend",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@radix-ui/react-dialog": "^1.0.5",
-    "@radix-ui/react-slot": "^1.0.2",
-    "@radix-ui/react-toast": "^1.1.5",
-    "@radix-ui/react-tooltip": "^1.0.7",
-    "@tanstack/react-query": "^5.32.0",
-    "class-variance-authority": "^0.7.0",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.378.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "socket.io-client": "4.5.4",  // MODIFIED: Downgrade to 4.5.4
-    "tailwind-merge": "^2.3.0",
-    "tailwindcss-animate": "^1.0.7",
-    "wouter": "^3.2.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.12.12",
-    "@types/react": "^18.2.66",
-    "@types/react-dom": "^18.2.22",
-    "@typescript-eslint/eslint-plugin": "^7.2.0",
-    "@typescript-eslint/parser": "^7.2.0",
-    "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.19",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.6",
-    "postcss": "^8.4.38",
-    "tailwindcss": "^3.4.3",
-    "typescript": "^5.2.2",
-    "vite": "^5.2.0"
-  }
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import io, { Socket } from 'socket.io-client';
+import { ChatMessage, SocketEvents } from '@/types/chat';
+
+// Define the shape of the context value
+interface SocketContextType {
+    socket: Socket | undefined;
+    isConnected: boolean;
+    connectionError: string | null;
+    emit: (eventName: string, payload: any) => void;
+    on: (eventName: string, handler: Function) => () => void;
+    joinRoom: (roomId: string, username: string) => void;
+    leaveRoom: (roomId: string, username: string) => void;
+    sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
+    sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
+}
+
+// Create the context with an initial undefined value
+const SocketContext = createContext<SocketContextType | undefined>(undefined);
+
+/**
+ * SocketProvider component that initializes and manages the Socket.IO connection
+ * Provides the socket instance and its functions to all children components
+ */
+interface SocketProviderProps {
+    children: ReactNode;
+}
+
+export function SocketProvider({ children }: SocketProviderProps) {
+    const [socket, setSocket] = useState<Socket | undefined>(undefined);
+    const [isConnected, setIsConnected] = useState(false);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
+
+    const BACKEND_URL = 'https://pariworld-backend.onrender.com';
+
+    // This useEffect initializes the Socket.IO client ONLY ONCE when the provider mounts
+    useEffect(() => {
+        console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
+        const socketInstance = io(BACKEND_URL, {
+            path: '/ws',
+            transports: ['polling', 'websocket'], // Prioritize polling
+            withCredentials: true,
+            pingInterval: 30000, // Increased ping interval
+            pingTimeout: 25000,  // Increased ping timeout
+            forceNew: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5
+        });
+
+        socketInstance.on('connect', () => {
+            console.log('[SocketProvider] Socket.IO connected successfully! (Frontend)');
+            setSocket(socketInstance);
+            setIsConnected(true);
+            setConnectionError(null);
+            console.log('[SocketProvider] Socket state set to connected instance. (Inside connect handler)');
+        });
+
+        socketInstance.on('disconnect', (reason) => {
+            console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
+            setIsConnected(false);
+            setSocket(undefined);
+            if (reason === 'io server disconnect') {
+                setConnectionError('Disconnected by server. Attempting to reconnect...');
+            } else {
+                setConnectionError(`Disconnected: ${reason}`);
+            }
+        });
+
+        socketInstance.on('connect_error', (error) => {
+            console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
+                          error.message,
+                          'Description:', (error as any).description,
+                          'Type:', (error as any).type,
+                          'Event:', (error as any).event,
+                          'Reason:', (error as any).reason,
+                          error.stack);
+            setConnectionError(`Connection failed: ${error.message}`);
+            setIsConnected(false);
+            setSocket(undefined);
+        });
+
+        socketInstance.on('reconnect_attempt', (attemptNumber) => {
+            console.log(`[SocketProvider] Reconnect attempt #${attemptNumber}`);
+            setConnectionError(`Attempting to reconnect... (Attempt ${attemptNumber})`);
+        });
+
+        socketInstance.on('reconnect', (attemptNumber) => {
+            console.log(`[SocketProvider] Reconnected successfully after ${attemptNumber} attempts`);
+            setSocket(socketInstance);
+            setIsConnected(true);
+            setConnectionError(null);
+        });
+
+        socketInstance.on('reconnect_error', (error) => {
+            console.error('[SocketProvider] Reconnect error:', error.message);
+            setConnectionError(`Reconnect failed: ${error.message}`);
+            setSocket(undefined);
+        });
+
+        socketInstance.on('reconnect_failed', () => {
+            console.error('[SocketProvider] Reconnect failed permanently.');
+            setConnectionError('Reconnect failed permanently. Please refresh.');
+            setSocket(undefined);
+        });
+
+        return () => {
+            if (socketInstance) {
+                console.log('[SocketProvider useEffect] Disconnecting Socket.IO client on provider unmount.');
+                socketInstance.offAny();
+                socketInstance.disconnect();
+            }
+        };
+    }, [BACKEND_URL]);
+
+    const emit = useCallback((eventName: string, payload: any) => {
+        if (socket && socket.connected) {
+            socket.emit(eventName, payload);
+            console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
+        } else {
+            console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected or not initialized.`);
+        }
+    }, [socket]);
+
+    const on = useCallback((eventName: string, handler: Function) => {
+        if (socket) {
+            socket.on(eventName, handler);
+        } else {
+            console.warn(`[Socket.on] Socket not yet available when trying to attach '${eventName}' handler.`);
+        }
+        return () => {
+            if (socket) {
+                socket.off(eventName, handler);
+            }
+        };
+    }, [socket]);
+
+    const joinRoom = useCallback((roomId: string, username: string) => {
+        emit(SocketEvents.JoinRoom, { roomId, username });
+    }, [emit]);
+
+    const leaveRoom = useCallback((roomId: string, username: string) => {
+        emit(SocketEvents.LeaveRoom, { roomId, username });
+    }, [emit]);
+
+    const sendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+        emit(SocketEvents.SendMessage, message);
+    }, [emit]);
+
+    const sendTypingStatus = useCallback((roomId: string, username: string, isTyping: boolean) => {
+        emit(isTyping ? SocketEvents.TypingStart : SocketEvents.TypingStop, { roomId, username });
+    }, [emit]);
+
+    const contextValue = {
+        socket,
+        isConnected,
+        connectionError,
+        emit,
+        on,
+        joinRoom,
+        leaveRoom,
+        sendMessage,
+        sendTypingStatus
+    };
+
+    return (
+        <SocketContext.Provider value={contextValue}>
+            {children}
+        </SocketContext.Provider>
+    );
+}
+
+/**
+ * Custom hook to consume the SocketContext
+ * Components use this hook to access the socket instance and its functions
+ */
+export function useSocket() {
+    const context = useContext(SocketContext);
+    if (context === undefined) {
+        throw new Error('useSocket must be used within a SocketProvider');
+    }
+    return context;
 }
