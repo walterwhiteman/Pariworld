@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import io, { Socket } from 'socket.io-client';
+import io, { Socket, SocketOptions, ManagerOptions } from 'socket.io-client'; // Import SocketOptions and ManagerOptions
 import { ChatMessage, SocketEvents } from '@/types/chat';
 
 // Define the shape of the context value
@@ -8,7 +8,7 @@ interface SocketContextType {
     isConnected: boolean;
     connectionError: string | null;
     emit: (eventName: string, payload: any) => void;
-    on: (eventName: string, handler: Function) => () => void;
+    on: (eventName: string, handler: (...args: any[]) => void) => () => void; // Explicitly type handler
     joinRoom: (roomId: string, username: string) => void;
     leaveRoom: (roomId: string, username: string) => void;
     sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
@@ -40,14 +40,15 @@ export function SocketProvider({ children }: SocketProviderProps) {
             path: '/ws',
             transports: ['polling', 'websocket'], // Prioritize polling
             withCredentials: true,
-            pingInterval: 30000, // Increased ping interval
-            pingTimeout: 25000,  // Increased ping timeout
+            // These options are compatible with socket.io-client@4.x.x
+            pingInterval: 30000,
+            pingTimeout: 25000,
             forceNew: true,
             reconnectionAttempts: 10,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
             randomizationFactor: 0.5
-        });
+        } as Partial<ManagerOptions & SocketOptions>); // Type assertion for options
 
         socketInstance.on('connect', () => {
             console.log('[SocketProvider] Socket.IO connected successfully! (Frontend)');
@@ -123,7 +124,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         }
     }, [socket]);
 
-    const on = useCallback((eventName: string, handler: Function) => {
+    const on = useCallback((eventName: string, handler: (...args: any[]) => void) => { // Explicitly type handler
         if (socket) {
             socket.on(eventName, handler);
         } else {
