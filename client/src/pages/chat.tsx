@@ -3,9 +3,9 @@ import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { NotificationToast } from '@/components/chat/NotificationToast';
+import { NotificationToast } from '@/components/chat/NotificationToast'; // VideoCallModal import removed
 import { useSocket } from '@/hooks/useSocket';
-// import { useWebRTC } from '@/hooks/useWebRTC'; // Removed import for diagnosis
+// import { useWebRTC } from '@/hooks/useWebRTC'; // REMOVED: Temporarily remove WebRTC import
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
@@ -32,7 +32,7 @@ export default function ChatPage() {
 
     // Hooks - useSocket now gets its value from context
     const { socket, isConnected: socketIsConnected, connectionError, joinRoom, leaveRoom, sendMessage, sendTypingStatus, on } = useSocket();
-    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // Removed usage for diagnosis
+    // const webRTC = useWebRTC(socket, roomState.roomId, roomState.username); // REMOVED: Temporarily remove WebRTC usage
 
     // Use a ref to store the latest roomState and username for handlers
     const roomStateRef = useRef(roomState);
@@ -111,7 +111,7 @@ export default function ChatPage() {
             console.log('[ChatPage] Emitted leave-room event.');
         }
 
-        // webRTC.endCall(); // Removed usage for diagnosis
+        // webRTC.endCall(); // REMOVED: Temporarily remove WebRTC usage
 
         setRoomState({
             roomId: '',
@@ -165,24 +165,10 @@ export default function ChatPage() {
         }
     }, [roomState, socket, sendTypingStatus]);
 
+    // MODIFIED: handleStartVideoCall now just shows a notification
     const handleStartVideoCall = useCallback(() => {
         addNotification('info', 'Feature Disabled', 'Video call is temporarily disabled for debugging.');
-        // if (!roomState.isConnected) {
-        //     addNotification('error', 'Call Error', 'Not connected to room.');
-        //     return;
-        // }
-
-        // const userToCall = 'OTHER_USER_USERNAME_HERE';
-
-        // if (!userToCall || userToCall === roomState.username) {
-        //     addNotification('warning', 'Call Info', 'Please enter a valid username for the other person to call.');
-        //     return;
-        // }
-
-        // console.log(`[ChatPage] Attempting to call: ${userToCall}`);
-        // addNotification('info', 'Calling', `Attempting to call ${userToCall}...`);
-
-    }, [roomState, addNotification]);
+    }, [addNotification]);
 
 
     // Define all event handlers as useCallback functions
@@ -340,7 +326,7 @@ export default function ChatPage() {
                         username={roomState.username}
                         participants={roomState.participants}
                         onLeaveRoom={handleLeaveRoom}
-                        onStartVideoCall={handleStartVideoCall} // Still pass the handler, but it's now a no-op
+                        onStartVideoCall={handleStartVideoCall} // This handler now just shows a notification
                     />
                     <ChatMessages
                         messages={roomState.messages}
@@ -357,7 +343,7 @@ export default function ChatPage() {
                 </>
             )}
 
-            {/* Video Call Modal (REMOVED FOR DIAGNOSIS) */}
+            {/* Video Call Modal (REMOVED FROM RENDER) */}
             {/* <VideoCallModal
                 isOpen={webRTC.callState.isModalOpen}
                 onClose={webRTC.closeCallModal}
