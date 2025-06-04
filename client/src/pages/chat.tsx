@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
-import { MessageInput } => '@/components/chat/MessageInput';
+import { MessageInput } from '@/components/chat/MessageInput'; // Corrected: 'from' instead of '=>'
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
