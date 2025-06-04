@@ -3,7 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatPage from "@/pages/chat";
-import { SocketProvider } from '@/hooks/useSocket'; // Correctly import SocketProvider
+import { SocketProvider } from '@/hooks/useSocket';
 import React from 'react';
 
 function AppContent() {
