@@ -1,68 +1,49 @@
-import { pgTable, text, serial, integer, boolean, timestamp } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { pgTable, serial, text, timestamp, boolean } from 'drizzle-orm/pg-core'; // Import from pg-core
+import { relations } from 'drizzle-orm'; // Import relations
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod'; // Import from drizzle-zod
+import { z } from 'zod'; // Import z from zod
 
-// User schema for basic user info
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+// Define messages table
+export const messages = pgTable('messages', {
+  id: serial('id').primaryKey(),
+  roomId: text('room_id').notNull(),
+  sender: text('sender').notNull(),
+  content: text('content'),
+  imageData: text('image_data'), // Base64 image data
+  messageType: text('message_type').notNull().default('text'), // 'text' or 'image' or 'system'
+  timestamp: timestamp('timestamp').notNull().defaultNow(),
 });
 
-// Chat room schema for room-based messaging
-export const chatRooms = pgTable("chat_rooms", {
-  id: serial("id").primaryKey(),
-  roomId: text("room_id").notNull().unique(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+// Define roomParticipants table
+export const roomParticipants = pgTable('room_participants', {
+  id: serial('id').primaryKey(),
+  roomId: text('room_id').notNull(),
+  username: text('username').notNull(),
+  joinedAt: timestamp('joined_at').notNull().defaultNow(),
+  lastSeen: timestamp('last_seen').notNull().defaultNow(),
 });
 
-// Messages schema for storing chat messages
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  roomId: text("room_id").notNull(),
-  sender: text("sender").notNull(),
-  content: text("content"),
-  imageData: text("image_data"), // Base64 encoded image
-  messageType: text("message_type").notNull().default("text"), // "text" | "image" | "system"
-  timestamp: timestamp("timestamp").notNull().defaultNow(),
-});
+// Define relations (optional, but good for Drizzle ORM)
+export const messagesRelations = relations(messages, ({ one }) => ({
+  // Example: if messages had a direct relation to participants
+  // senderUser: one(roomParticipants, { fields: [messages.sender], references: [roomParticipants.username] }),
+}));
 
-// Room participants for tracking active users
-export const roomParticipants = pgTable("room_participants", {
-  id: serial("id").primaryKey(),
-  roomId: text("room_id").notNull(),
-  username: text("username").notNull(),
-  isActive: boolean("is_active").notNull().default(true),
-  joinedAt: timestamp("joined_at").notNull().defaultNow(),
-});
+export const roomParticipantsRelations = relations(roomParticipants, ({ many }) => ({
+  // Example: if rooms had messages
+  // messages: many(messages),
+}));
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
 
-export const insertChatRoomSchema = createInsertSchema(chatRooms).pick({
-  roomId: true,
-});
+// Zod schemas for validation (optional, but good practice)
+export const insertMessageSchema = createInsertSchema(messages);
+export const selectMessageSchema = createSelectSchema(messages);
 
-export const insertMessageSchema = createInsertSchema(messages).pick({
-  roomId: true,
-  sender: true,
-  content: true,
-  imageData: true,
-  messageType: true,
-});
+export const insertRoomParticipantSchema = createInsertSchema(roomParticipants);
+export const selectRoomParticipantSchema = createSelectSchema(roomParticipants);
 
-export const insertRoomParticipantSchema = createInsertSchema(roomParticipants).pick({
-  roomId: true,
-  username: true,
-});
+export type Message = z.infer<typeof selectMessageSchema>;
+export type NewMessage = z.infer<typeof insertMessageSchema>;
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
-export type InsertChatRoom = z.infer<typeof insertChatRoomSchema>;
-export type ChatRoom = typeof chatRooms.$inferSelect;
-export type InsertMessage = z.infer<typeof insertMessageSchema>;
-export type Message = typeof messages.$inferSelect;
-export type InsertRoomParticipant = z.infer<typeof insertRoomParticipantSchema>;
-export type RoomParticipant = typeof roomParticipants.$inferSelect;
+export type RoomParticipant = z.infer<typeof selectRoomParticipantSchema>;
+export type NewRoomParticipant = z.infer<typeof insertRoomParticipantSchema>;
