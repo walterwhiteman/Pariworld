@@ -1,8 +1,8 @@
-// src/index.ts (Refactored Code)
+// src/index.ts (Complete Code - MODIFIED)
 
 import express, { type Request, Response, NextFunction } from "express";
-import { createServer, type Server as HttpServer } from "http";
-import { Server as SocketIOServer } from 'socket.io';
+import { createServer, type Server as HttpServer } from "http"; // Import HttpServer type
+import { Server as SocketIOServer } from 'socket.io'; // Import SocketIOServer
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
@@ -84,15 +84,15 @@ app.use((req, res, next) => {
     const io: SocketIOServer = new SocketIOServer(httpServer, {
         path: '/ws',
         cors: {
-            // MODIFIED: Allow all origins for testing. If this works, we'll narrow it down.
-            origin: "*", // Temporarily allow all origins for testing
+            // MODIFIED: Set the exact frontend origin instead of '*' to allow credentials
+            origin: "https://pariworld.onrender.com", 
             methods: ["GET", "POST"],
             credentials: true
         },
         transports: ['websocket', 'polling'],
-        // ADDED: Adjust ping intervals to be more tolerant of network latency
-        pingInterval: 25000, // Send ping every 25 seconds
-        pingTimeout: 20000,  // Disconnect if no pong received within 20 seconds
+        pingInterval: 25000, 
+        pingTimeout: 20000,
+        serveClient: false, 
     });
     console.log('[Backend] HTTP server and Socket.IO server instances created.');
 
