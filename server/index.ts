@@ -1,9 +1,9 @@
 // src/index.ts (Refactored Code)
 
 import express, { type Request, Response, NextFunction } from "express";
-import { createServer, type Server as HttpServer } from "http"; // Import HttpServer type
-import { Server as SocketIOServer } from 'socket.io'; // Import SocketIOServer
-import { registerRoutes } from "./routes"; // This now accepts 'io' as an argument
+import { createServer, type Server as HttpServer } from "http";
+import { Server as SocketIOServer } from 'socket.io';
+import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 
@@ -80,23 +80,29 @@ app.use((req, res, next) => {
 
 
 (async () => {
-    // --- MODIFIED: Create HTTP server and Socket.IO server directly here ---
-    const httpServer: HttpServer = createServer(app); // Create HTTP server
-    const io: SocketIOServer = new SocketIOServer(httpServer, { // Attach Socket.IO to HTTP server
-        path: '/ws', // Frontend expects this path
+    const httpServer: HttpServer = createServer(app);
+    const io: SocketIOServer = new SocketIOServer(httpServer, {
+        path: '/ws',
         cors: {
-            origin: "https://pariworld.onrender.com", // Ensure this matches your frontend URL
+            // MODIFIED: Allow all origins for testing. If this works, we'll narrow it down.
+            origin: "*", // Temporarily allow all origins for testing
             methods: ["GET", "POST"],
             credentials: true
         },
-        transports: ['websocket', 'polling']
+        transports: ['websocket', 'polling'],
+        // ADDED: Adjust ping intervals to be more tolerant of network latency
+        pingInterval: 25000, // Send ping every 25 seconds
+        pingTimeout: 20000,  // Disconnect if no pong received within 20 seconds
     });
     console.log('[Backend] HTTP server and Socket.IO server instances created.');
 
-    // Pass the Socket.IO instance to registerRoutes to set up event handlers
-    await registerRoutes(app, io); // MODIFIED: Pass 'io' to registerRoutes
+    await registerRoutes(app, io);
 
-    // --- EXISTING: API ENDPOINT FOR MESSAGE CLEANUP ---
+    app.get('/api/test-connection', (req: Request, res: Response) => {
+        console.log(`[${new Date().toISOString()}] Received test connection request.`);
+        res.status(200).send('Backend is reachable via HTTP!');
+    });
+
     app.post('/api/cleanup-messages', authenticateCleanup, async (req: Request, res: Response) => {
         console.log(`[${new Date().toISOString()}] External cleanup trigger received.`);
         try {
@@ -122,20 +128,17 @@ app.use((req, res, next) => {
     });
 
     if (app.get("env") === "development") {
-        await setupVite(app, httpServer); // Pass httpServer to setupVite
+        await setupVite(app, httpServer);
     } else {
         serveStatic(app);
     }
 
-    // Use the PORT environment variable provided by Render
-    const port = process.env.PORT || 5000; // Default to 5000 if PORT is not set (e.g., local dev)
-    const host = '0.0.0.0'; // Listen on all network interfaces for Render deployment
+    const port = process.env.PORT || 5000;
+    const host = '0.0.0.0';
 
-    // Listen on the HTTP server, after Socket.IO is attached
     httpServer.listen({
         port,
         host,
-        // MODIFIED: Removed reusePort: true as it can sometimes cause issues in container environments
     }, () => {
         const address = httpServer.address();
         if (address && typeof address === 'object') {
