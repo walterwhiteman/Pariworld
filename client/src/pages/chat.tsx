@@ -187,7 +187,7 @@ export default function ChatPage() {
             sender: 'System',
             content: `You have joined the room ${data.roomId}.`,
             messageType: 'system',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString() // This is a string
         };
         setRoomState(prev => ({
             ...prev,
@@ -198,7 +198,8 @@ export default function ChatPage() {
 
     const handleMessageReceived = useCallback((message: ChatMessage) => {
         console.log('[Frontend] Message received:', message);
-        const parsedMessage = { ...message, timestamp: new Date(message.timestamp) };
+        // Ensure timestamp is handled as a string as it comes from toISOString()
+        const parsedMessage = { ...message, timestamp: message.timestamp };
 
         setRoomState(prev => ({
             ...prev,
@@ -241,7 +242,7 @@ export default function ChatPage() {
         console.log('[Frontend] Message history received:', data.messages);
         const historyMessages = data.messages.map(msg => ({
             ...msg,
-            timestamp: new Date(msg.timestamp)
+            timestamp: msg.timestamp // Already a string
         }));
         setRoomState(prev => ({
             ...prev,
