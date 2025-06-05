@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { VideoCallState, WebRTCSignal, SocketContextType } from '@/types/chat'; // <--- CORRECTED IMPORT: SocketContextType now from types/chat
+import { VideoCallState, WebRTCSignal, SocketContextType } from '@/types/chat'; // <--- SocketContextType is imported from here
 
 /**
  * Custom hook for WebRTC video calling functionality
  * Implements peer-to-peer video communication for the chat application
  */
 export function useWebRTC(
-  socket: SocketContextType, // Use the typed SocketContextType
+  // TEMPORARY CHANGE: Changing socket parameter type for debugging
+  socket: any, // Changed from SocketContextType to 'any' for diagnostic purposes
   roomId: string,
   username: string,
   localVideoRef: React.RefObject<HTMLVideoElement>,
