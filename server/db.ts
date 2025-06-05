@@ -1,6 +1,8 @@
 // server/src/db.ts
 
-import { Pool } from 'pg';
+import pg from 'pg'; // <-- CHANGED: Import the default export of 'pg'
+const { Pool } = pg; // <-- CHANGED: Destructure Pool from the default export
+
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '../shared/schema'; // Import your Drizzle schema
 
