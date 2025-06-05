@@ -1,15 +1,15 @@
-import express, { type Express } from "express";
+import express, { type Express, Request, Response, NextFunction } from "express";
 import fs from "fs";
-import path, { dirname } from "path";
-import { createServer as createViteServer, createLogger } from "vite";
+import path from "path";
+import { createServer as createViteServer, createLogger, ServerOptions } from "vite";
 import { type Server } from "http";
-import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const viteLogger = createLogger();
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -23,7 +23,12 @@ export function log(message: string, source = "express") {
 }
 
 export async function setupVite(app: Express, server: Server) {
-  const serverOptions = {
+  // Dynamically import vite.config.ts from the client directory
+  const viteConfigPath = path.resolve(__dirname, '..', '..', 'client', 'vite.config.ts');
+  const viteConfigModule = await import(viteConfigPath);
+  const viteConfig = viteConfigModule.default;
+
+  const serverOptions: ServerOptions = {
     middlewareMode: true,
     hmr: { server },
     allowedHosts: true,
@@ -31,7 +36,7 @@ export async function setupVite(app: Express, server: Server) {
 
   const vite = await createViteServer({
     ...viteConfig,
-    configFile: false,
+    configFile: false, // Ensure Vite doesn't try to load it again
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -44,20 +49,24 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
-
-  app.use("*", async (req, res, next) => {
+  app.use("*", async (req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl;
 
     try {
-      const clientTemplate = path.resolve(__dirname, "..", "client", "index.html");
+      // In development, serve index.html from the client's root
+      const clientTemplate = path.resolve(
+        __dirname,
+        "..",
+        "..", // Go up to project root
+        "client",
+        "index.html",
+      );
 
-      // Reload index.html from disk on every request to pick up changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
-
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
@@ -68,19 +77,20 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  // Corrected path: __dirname (which is 'dist' in the bundled context) + 'client'
-  const distPath = path.resolve(__dirname, "client"); // <-- CHANGED THIS LINE
+  // In production, the client build output is expected to be in a 'public' subfolder
+  // inside the backend's 'dist' folder.
+  const distPath = path.resolve(__dirname, "public"); // MODIFIED: Correct path relative to backend's dist folder
 
   if (!fs.existsSync(distPath)) {
     throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
+      `Could not find the build directory: ${distPath}, make sure to build the client first`
     );
   }
 
   app.use(express.static(distPath));
 
-  // Fall through to index.html for SPA routing
-  app.use("*", (_req, res) => {
+  app.use("*", (_req: Request, res: Response) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
+
