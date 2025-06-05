@@ -8,14 +8,17 @@ import { VideoCallState, WebRTCSignal, SocketContextType } from '@/types/chat'; 
 export function useWebRTC(
   socket: SocketContextType, // Use the typed SocketContextType
   roomId: string,
-  username: string
+  username: string,
+  // ADDED: Accept localVideoRef and remoteVideoRef as arguments
+  localVideoRef: React.RefObject<HTMLVideoElement>,
+  remoteVideoRef: React.RefObject<HTMLVideoElement>
 ) {
   // State for the video call's current status and properties
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
-    isInitiator: false, // Will be set to true if this peer initiates the call
-    isRinging: false,   // Set to true when an incoming call is received
-    isAnswered: false,  // Set to true once the call is answered
+    isInitiator: false,
+    isRinging: false,
+    isAnswered: false,
     isLocalVideoEnabled: true,
     isLocalAudioEnabled: true,
     localStream: null,
@@ -23,19 +26,17 @@ export function useWebRTC(
     remoteUser: null,
     hasLocalStream: false,
     hasRemoteStream: false,
-    callDuration: 0, // Initialized as a number, formatted to string for display
+    callDuration: 0,
     error: null,
   });
 
-  // Refs for WebRTC components and video elements
+  // Refs for WebRTC components (peerConnection) and timers
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null); // Internal ref, returned by hook
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null); // Internal ref, returned by hook
+  // REMOVED: localVideoRef and remoteVideoRef are now passed as arguments
   const callStartTimeRef = useRef<number | null>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // WebRTC configuration with STUN (Session Traversal Utilities for NAT) servers
-  // STUN servers help establish a direct connection between peers
   const rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -52,41 +53,35 @@ export function useWebRTC(
       const peerConnection = new RTCPeerConnection(rtcConfig);
       peerConnectionRef.current = peerConnection;
 
-      // Event: onicecandidate
-      // Called when an ICE candidate is generated (network information about the local peer)
+      // Handle ICE candidates
       peerConnection.onicecandidate = (event) => {
         if (event.candidate && socket?.emit) {
-          // Send ICE candidate to the remote peer via Socket.IO
           socket.emit('webrtc-signal', {
             type: 'ice-candidate',
             data: event.candidate,
             roomId,
             sender: username,
-            // Recipient can be added here if known, but not strictly required for direct peer-to-peer
           });
         }
       };
 
-      // Event: ontrack
-      // Called when a remote peer adds a media track to the connection (e.g., video, audio)
+      // Handle remote stream
       peerConnection.ontrack = (event) => {
         console.log('Received remote stream:', event.streams[0]);
         const [remoteStream] = event.streams;
         setCallState(prev => ({ ...prev, remoteStream, hasRemoteStream: true }));
 
-        // Attach the remote stream to the remote video element
+        // Attach the remote stream to the remote video element using the PASSED REF
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
         }
       };
 
-      // Event: onconnectionstatechange
-      // Monitors the overall connection state of the RTCPeerConnection
+      // Handle connection state changes
       peerConnection.onconnectionstatechange = () => {
         console.log('Peer connection state:', peerConnection.connectionState);
         if (peerConnection.connectionState === 'disconnected' ||
             peerConnection.connectionState === 'failed') {
-          // If connection fails or disconnects, end the call
           endCall();
         }
       };
@@ -97,7 +92,7 @@ export function useWebRTC(
       setCallState(prev => ({ ...prev, error: 'Failed to initialize peer connection' }));
       return null;
     }
-  }, [socket, roomId, username, endCall]); // endCall added to dependencies
+  }, [socket, roomId, username, endCall, remoteVideoRef]); // remoteVideoRef added to dependencies
 
   /**
    * Accesses the user's media devices (camera and microphone).
@@ -112,7 +107,7 @@ export function useWebRTC(
 
       setCallState(prev => ({ ...prev, localStream: stream, hasLocalStream: true }));
 
-      // Attach the local stream to the local video element
+      // Attach the local stream to the local video element using the PASSED REF
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
@@ -123,7 +118,7 @@ export function useWebRTC(
       setCallState(prev => ({ ...prev, error: 'Failed to access camera/microphone. Please ensure permissions are granted.' }));
       return null;
     }
-  }, []);
+  }, [localVideoRef]); // localVideoRef added to dependencies
 
   /**
    * Initiates a new video call.
@@ -169,8 +164,8 @@ export function useWebRTC(
         isInitiator: true,
         localStream,
         hasLocalStream: true,
-        callDuration: 0, // Reset duration
-        error: null, // Clear any previous errors
+        callDuration: 0,
+        error: null,
       }));
 
       // Start call duration timer
@@ -231,8 +226,8 @@ export function useWebRTC(
         isAnswered: true,
         localStream,
         hasLocalStream: true,
-        callDuration: 0, // Reset duration
-        error: null, // Clear any previous errors
+        callDuration: 0,
+        error: null,
       }));
 
       // Start call duration timer
@@ -275,7 +270,7 @@ export function useWebRTC(
         callState.remoteStream.getTracks().forEach(track => track.stop());
     }
 
-    // Clear srcObject of video elements
+    // Clear srcObject of video elements using the PASSED REFS
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
     }
@@ -311,7 +306,7 @@ export function useWebRTC(
     });
 
     callStartTimeRef.current = null;
-  }, [callState.localStream, callState.remoteStream, callState.isActive, socket, roomId, username]);
+  }, [callState.localStream, callState.remoteStream, callState.isActive, socket, roomId, username, localVideoRef, remoteVideoRef]); // Added refs to dependencies
 
   /**
    * Toggles the local video track's enabled state.
@@ -393,8 +388,7 @@ export function useWebRTC(
         switch (signal.type) {
           case 'offer':
             console.log('Received offer from:', signal.sender);
-            setCallState(prev => ({ ...prev, remoteUser: signal.sender, isRinging: true })); // Set remote user and ringing
-            // Auto-answer for simplicity, or implement user prompt
+            setCallState(prev => ({ ...prev, remoteUser: signal.sender, isRinging: true }));
             await answerCall(signal.data);
             break;
 
@@ -404,7 +398,7 @@ export function useWebRTC(
               await peerConnection.setRemoteDescription(
                 new RTCSessionDescription(signal.data)
               );
-              setCallState(prev => ({ ...prev, isAnswered: true, isRinging: false })); // Mark as answered
+              setCallState(prev => ({ ...prev, isAnswered: true, isRinging: false }));
             }
             break;
 
@@ -430,7 +424,7 @@ export function useWebRTC(
 
     const cleanup = socket.on('webrtc-signal', handleWebRTCSignal);
     return cleanup;
-  }, [socket, roomId, username, answerCall, endCall]); // Dependencies
+  }, [socket, roomId, username, answerCall, endCall]);
 
   /**
    * Cleanup when the component using this hook unmounts.
@@ -438,15 +432,15 @@ export function useWebRTC(
    */
   useEffect(() => {
     return () => {
-      endCall(); // Ensure call is ended on component unmount
+      endCall();
     };
   }, [endCall]);
 
   // Return the call state, video refs, and control functions for parent component
   return {
     callState,
-    localVideoRef, // Return internal ref
-    remoteVideoRef, // Return internal ref
+    localVideoRef,
+    remoteVideoRef,
     startCall,
     endCall,
     toggleVideo,
