@@ -68,7 +68,8 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "public");
+  // Corrected path: __dirname (which is 'dist' in the bundled context) + 'client'
+  const distPath = path.resolve(__dirname, "client"); // <-- CHANGED THIS LINE
 
   if (!fs.existsSync(distPath)) {
     throw new Error(
