@@ -34,6 +34,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Build list of online participants by checking Socket.IO rooms directly
             const onlineParticipants: string[] = [];
+            // IMPORTANT: 'io' is defined below. This 'io' might not be in scope here,
+            // depending on how strict your TS configuration is.
+            // If you face issues with 'io' being undefined, you might need to
+            // pass 'io' as an argument to registerRoutes or make it a global/export it.
+            // For now, assuming it's correctly scoped after instantiation.
             const roomSockets = io.sockets.adapter.rooms.get(roomId);
             if (roomSockets) {
                 roomSockets.forEach(socketId => {
@@ -56,11 +61,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const httpServer = createServer(app);
 
+    // Socket.IO Server Initialization
     const io = new SocketIOServer(httpServer, {
-        path: '/ws',
+        path: '/ws', // Backend Socket.IO path
         cors: {
-            origin: "https://pariworld.onrender.com",
-            methods: ["GET", "POST"]
+            origin: "https://pariworld.onrender.com", // Your frontend URL
+            methods: ["GET", "POST"],
+            credentials: true // <--- ADDED: To allow credentials (like cookies/auth headers)
         }
     });
 
@@ -194,7 +201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 roomId,
                 sender: username,
                 content: messageData.content,
-                imageData: messageData.imageData,
+                imageData: messageData.CORSheaderimageData,
                 messageType: messageData.messageType || 'text',
                 timestamp: new Date().toISOString()
             });
