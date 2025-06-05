@@ -4,8 +4,11 @@ import { Server as SocketIOServer } from 'socket.io';
 import { storage } from "./storage";
 import { RoomParticipant } from "@shared/schema";
 
+// NOTE: This interface is for backend context. 
+// Ensure your frontend's ChatMessage interface (in client/src/types/chat.ts)
+// *explicitly* defines 'id: string;' as well.
 interface ChatMessage {
-    id: number;
+    id: string; // Changed to string for consistency with generateMessageId
     roomId: string;
     sender: string;
     content?: string;
@@ -32,14 +35,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const participants = await storage.getRoomParticipants(roomId);
             const activeParticipants = participants.filter(p => p.isActive);
 
-            // Build list of online participants by checking Socket.IO rooms directly
-            const onlineParticipants: string[] = [];
-            // IMPORTANT: 'io' is defined below. This 'io' might not be in scope here,
-            // depending on how strict your TS configuration is.
-            // If you face issues with 'io' being undefined, you might need to
-            // pass 'io' as an argument to registerRoutes or make it a global/export it.
-            // For now, assuming it's correctly scoped after instantiation.
+            // IMPORTANT: 'io' is defined below. This 'io' might not be in scope here
+            // if this route is hit before io is initialized. For a simple app, it often works
+            // if registerRoutes is called after io initialization or if io is global.
+            // If you get an 'io is undefined' error specifically for this route,
+            // you might need to reorganize your server setup.
             const roomSockets = io.sockets.adapter.rooms.get(roomId);
+            const onlineParticipants: string[] = [];
             if (roomSockets) {
                 roomSockets.forEach(socketId => {
                     for (const [username, id] of usernameToSocketIdMap.entries()) {
@@ -61,13 +63,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const httpServer = createServer(app);
 
-    // Socket.IO Server Initialization
     const io = new SocketIOServer(httpServer, {
-        path: '/ws', // Backend Socket.IO path
+        path: '/ws',
         cors: {
-            origin: "https://pariworld.onrender.com", // Your frontend URL
+            origin: "https://pariworld.onrender.com",
             methods: ["GET", "POST"],
-            credentials: true // <--- ADDED: To allow credentials (like cookies/auth headers)
+            credentials: true
         }
     });
 
@@ -105,7 +106,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             socket.join(roomId);
             usernameToSocketIdMap.set(username, socket.id);
 
-            // Set socket.data for easier access later
             socket.data.roomId = roomId;
             socket.data.username = username;
 
@@ -123,6 +123,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     socket.emit('message-history', {
                         roomId,
                         messages: previousMessages.map(msg => ({
+                            // Ensure previous message IDs are strings
+                            id: String(msg.id), 
                             ...msg,
                             timestamp: msg.timestamp.toISOString()
                         }))
@@ -137,18 +139,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 participants: getRoomParticipants(roomId).filter(p => p !== username)
             });
 
-            io.to(roomId).emit('connection-status', {
-                connected: true,
-                participantCount: getRoomParticipantCount(roomId),
-                username
-            });
-
+            // System message for user joining - now includes ID
             io.to(roomId).emit('message-received', {
+                id: generateMessageId(), // <--- ADDED: System messages now have an ID
                 roomId,
                 sender: 'System',
                 content: `${username} joined the chat`,
                 messageType: 'system',
                 timestamp: new Date().toISOString()
+            });
+
+            io.to(roomId).emit('connection-status', {
+                connected: true,
+                participantCount: getRoomParticipantCount(roomId),
+                username
             });
         });
 
@@ -162,6 +166,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 } catch (error) {
                     console.error('Error removing room participant:', error);
                 }
+
+                // System message for user leaving - now includes ID
+                io.to(roomId).emit('message-received', {
+                    id: generateMessageId(), // <--- ADDED: System messages now have an ID
+                    roomId,
+                    sender: 'System',
+                    content: `${username} left the chat`,
+                    messageType: 'system',
+                    timestamp: new Date().toISOString()
+                });
 
                 io.to(roomId).emit('room-left', { roomId, username });
                 io.to(roomId).emit('connection-status', {
@@ -197,11 +211,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
 
             io.to(roomId).emit('message-received', {
-                id: generateMessageId(),
+                id: generateMessageId(), // This already generated a string ID
                 roomId,
                 sender: username,
                 content: messageData.content,
-                imageData: messageData.CORSheaderimageData,
+                imageData: messageData.imageData,
                 messageType: messageData.messageType || 'text',
                 timestamp: new Date().toISOString()
             });
@@ -257,6 +271,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 } catch (error) {
                     console.error('Error removing participant on disconnect:', error);
                 }
+
+                // System message for user disconnecting - now includes ID
+                io.to(disconnectedRoomId).emit('message-received', {
+                    id: generateMessageId(), // <--- ADDED: System messages now have an ID
+                    roomId: disconnectedRoomId,
+                    sender: 'System',
+                    content: `${disconnectedUsername} disconnected from the chat`,
+                    messageType: 'system',
+                    timestamp: new Date().toISOString()
+                });
 
                 io.to(disconnectedRoomId).emit('room-left', { roomId: disconnectedRoomId, username: disconnectedUsername });
                 io.to(disconnectedRoomId).emit('connection-status', {
