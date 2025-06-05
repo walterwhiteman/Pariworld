@@ -10,23 +10,42 @@ export interface ChatMessage {
   isSelf?: boolean;
 }
 
-// Socket event types
-export interface SocketEvents {
+// Socket event NAMES (as an enum for runtime usage)
+// This enum provides the actual string values for your event names
+export enum SocketEvents {
   // Client to server events
+  JoinRoom = 'join-room',
+  LeaveRoom = 'leave-room',
+  SendMessage = 'send-message',
+  TypingStart = 'typing-start',
+  TypingStop = 'typing-stop',
+
+  // Server to client events
+  RoomJoined = 'room-joined',
+  RoomLeft = 'room-left',
+  MessageReceived = 'message-received',
+  UserTyping = 'user-typing',
+  Error = 'error', // Renamed from 'error' to avoid potential conflicts with global Error object
+  ConnectionStatus = 'connection-status',
+}
+
+// Socket event HANDLERS (as an interface for type checking)
+// This interface describes the *signature* of the event listeners/emitters
+export interface SocketEventHandlers {
   'join-room': (data: { roomId: string; username: string }) => void;
   'leave-room': (data: { roomId: string; username: string }) => void;
   'send-message': (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
   'typing-start': (data: { roomId: string; username: string }) => void;
   'typing-stop': (data: { roomId: string; username: string }) => void;
-  
-  // Server to client events
+
   'room-joined': (data: { roomId: string; participants: string[] }) => void;
   'room-left': (data: { roomId: string; username: string }) => void;
   'message-received': (message: ChatMessage) => void;
   'user-typing': (data: { username: string; isTyping: boolean }) => void;
-  'error': (data: { message: string }) => void;
+  'error': (data: { message: string }) => void; // Using the original string literal
   'connection-status': (data: { connected: boolean; participantCount: number }) => void;
 }
+
 
 // Room state
 export interface RoomState {
