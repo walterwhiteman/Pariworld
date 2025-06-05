@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/src/index.ts",
-    "build": "npm install vite && vite build --base=/ && esbuild server/src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "vite build --base=/ && esbuild server/src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
     "db:push": "drizzle-kit push"
@@ -92,6 +92,9 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
+    "@types/react-day-picker": "^7.4.2",
+    "@types/react-resizable-panels": "^2.0.0",
+    "@types/react-hook-form": "^7.49.0",
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.30.4",
@@ -99,11 +102,7 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.1",
-    "typescript": "5.6.3",
-    "@types/socket.io": "^4.0.2",
-    "@types/socket.io-client": "^4.0.1",
-    "@types/react-resizable-panels": "^2.0.0",
-    "@types/react-hook-form": "^7.49.0"
+    "typescript": "5.6.3"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
