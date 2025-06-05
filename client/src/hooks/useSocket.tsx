@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import io, { Socket, SocketOptions, ManagerOptions } from 'socket.io-client';
-import { ChatMessage, SocketEvents } from '@/types/chat';
+// Use relative path to avoid potential alias resolution issues on Render
+// Also import SocketEventHandlers for strong typing the Socket instance
+import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat'; // <-- CHANGED THIS LINE
 
 // Define the shape of the context value
 interface SocketContextType {
-    socket: Socket | undefined;
+    socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined; // <-- CHANGED THIS LINE for strong typing
     isConnected: boolean;
     connectionError: string | null;
     emit: (eventName: string, payload: any) => void;
@@ -27,7 +29,7 @@ interface SocketProviderProps {
 }
 
 export function SocketProvider({ children }: SocketProviderProps) {
-    const [socket, setSocket] = useState<Socket | undefined>(undefined);
+    const [socket, setSocket] = useState<Socket<SocketEventHandlers, SocketEventHandlers> | undefined>(undefined); // <-- CHANGED THIS LINE
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
 
@@ -76,12 +78,12 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Event listener for connection errors
         socketInstance.on('connect_error', (error) => {
             console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
-                          error.message,
-                          'Description:', (error as any).description,
-                          'Type:', (error as any).type,
-                          'Event:', (error as any).event,
-                          'Reason:', (error as any).reason,
-                          error.stack);
+                            error.message,
+                            'Description:', (error as any).description,
+                            'Type:', (error as any).type,
+                            'Event:', (error as any).event,
+                            'Reason:', (error as any).reason,
+                            error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
             setIsConnected(false);
             setSocket(undefined);
