@@ -1,10 +1,10 @@
-import { defineConfig } from "vite";
+import { defineConfig } => "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-// Cartographer plugin import moved outside async context
+// Corrected Cartographer plugin import to use named export
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-import cartographer from "@replit/vite-plugin-cartographer";
+import { cartographer } from "@replit/vite-plugin-cartographer"; // <-- Corrected line
 
 const isReplit = process.env.REPL_ID !== undefined;
 const isDev = process.env.NODE_ENV !== "production";
