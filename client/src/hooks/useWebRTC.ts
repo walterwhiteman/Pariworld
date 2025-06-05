@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { VideoCallState, WebRTCSignal } from '@/types/chat';
-// IMPORT SocketContextType from useSocket.ts, not types/chat.ts
-import { SocketContextType } from '../hooks/useSocket'; // <--- CORRECTED IMPORT PATH
+import { VideoCallState, WebRTCSignal, SocketContextType } from '@/types/chat'; // <--- CORRECTED IMPORT: SocketContextType now from types/chat
 
 /**
  * Custom hook for WebRTC video calling functionality
