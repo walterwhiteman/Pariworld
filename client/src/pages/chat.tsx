@@ -32,9 +32,10 @@ export default function ChatPage() {
 
   const [location] = useLocation();
 
-  const socket = useSocket();
-  // Pass video refs to useWebRTC
-  const webRTC = useWebRTC(socket, roomState.roomId, roomState.username, localVideoRef, remoteVideoRef);
+  const socket = useSocket(); // Get socket context here
+
+  // Call useWebRTC without passing 'socket' as a parameter
+  const webRTC = useWebRTC(roomState.roomId, roomState.username, localVideoRef, remoteVideoRef); // <--- CORRECTED CALL
 
   const addNotification = useCallback((
     type: NotificationData['type'],
@@ -62,7 +63,7 @@ export default function ChatPage() {
   }, []);
 
   const handleJoinRoom = useCallback((roomId: string, username: string) => {
-    if (!socket.isConnected || !socket.socket) { // <--- Added socket.socket check
+    if (!socket.isConnected || !socket.socket) {
       addNotification('error', 'Connection Error', 'Unable to connect to chat server (Socket not ready)');
       return;
     }
@@ -106,7 +107,7 @@ export default function ChatPage() {
   }, [roomState, socket, webRTC, addNotification]);
 
   const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-    if (!roomState.isConnected || !socket.socket) { // <--- Added socket.socket check
+    if (!roomState.isConnected || !socket.socket) {
       addNotification('error', 'Connection Error', 'Not connected to chat room (Socket not ready)');
       return;
     }
@@ -127,13 +128,13 @@ export default function ChatPage() {
   }, [roomState.isConnected, socket, addNotification, generateMessageId]);
 
   const handleTypingStart = useCallback(() => {
-    if (roomState.isConnected && socket.socket) { // <--- Added socket.socket check
+    if (roomState.isConnected && socket.socket) {
       socket.sendTypingStatus(roomState.roomId, roomState.username, true);
     }
   }, [roomState, socket]);
 
   const handleTypingStop = useCallback(() => {
-    if (roomState.isConnected && socket.socket) { // <--- Added socket.socket check
+    if (roomState.isConnected && socket.socket) {
       socket.sendTypingStatus(roomState.roomId, roomState.username, false);
     }
   }, [roomState, socket]);
@@ -149,13 +150,11 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    // ONLY attach socket listeners if the actual socket instance is available
-    if (!socket.socket) { // <--- CRITICAL CHECK: Ensure socket instance is available
+    if (!socket.socket) {
         console.warn('Socket instance not yet available for event listeners.');
         return;
     }
 
-    // Room joined successfully
     const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
       console.log('Room joined successfully:', data);
 
@@ -183,7 +182,6 @@ export default function ChatPage() {
       }));
     });
 
-    // User left room
     const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
       console.log('User left room:', data);
 
@@ -209,7 +207,6 @@ export default function ChatPage() {
       }
     });
 
-    // Message received
     const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
       console.log('Message received:', message);
 
@@ -229,7 +226,6 @@ export default function ChatPage() {
       }));
     });
 
-    // Message history received on join
     const unsubscribeMessageHistory = socket.on('message-history', (data: { roomId: string; messages: ChatMessage[] }) => {
       console.log('Message history received:', data);
       setRoomState(prev => ({
@@ -242,7 +238,6 @@ export default function ChatPage() {
       }));
     });
 
-    // User typing
     const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
       console.log('User typing:', data);
 
@@ -251,7 +246,6 @@ export default function ChatPage() {
       }
     });
 
-    // Connection status
     const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number; username: string }) => {
       console.log('Connection status:', data);
 
@@ -262,14 +256,12 @@ export default function ChatPage() {
       }));
     });
 
-    // Error handling
     const unsubscribeError = socket.on('error', (data: { message: string }) => {
       console.error('Socket error:', data);
       addNotification('error', 'Error', data.message);
       setIsConnecting(false);
     });
 
-    // Cleanup function
     return () => {
       unsubscribeRoomJoined();
       unsubscribeRoomLeft();
@@ -279,7 +271,7 @@ export default function ChatPage() {
       unsubscribeConnectionStatus();
       unsubscribeError();
     };
-  }, [socket.socket, roomState.username, generateMessageId, addNotification]); // Added socket.socket to dependencies
+  }, [socket.socket, roomState.username, generateMessageId, addNotification]);
 
   useEffect(() => {
     if (socket.connectionError) {
