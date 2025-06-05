@@ -1,58 +1,52 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { fileURLToPath } from "url"; // <-- ADD THIS IMPORT
-import { dirname } from "path";     // <-- ADD THIS IMPORT
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
-// Define __filename and __dirname for ES Module compatibility
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename); // <-- ADD THESE LINES
-
-// Custom plugin for runtime error overlay (optional)
-function runtimeErrorOverlay() {
-  return {
-    name: "runtime-error-overlay",
-    apply: "serve", // Only apply in dev mode
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url === "/__runtime_error_overlay") {
-          // Serve a simple HTML page or JSON indicating runtime error
-          res.writeHead(200, { "Content-Type": "text/html" });
-          res.end("<h1>Runtime Error Occurred. Check Console.</h1>");
-        } else {
-          next();
-        }
-      });
-    },
-  };
-}
-
-// Replit specific plugin for cartographer (optional)
-function cartographer() {
-  return {
-    name: "replit-cartographer",
-    apply: "serve",
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url === "/__cartographer_ping") {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ status: "ok" }));
-        } else {
-          next();
-        }
-      });
-    },
-  };
-}
-
-const isDev = process.env.NODE_ENV === "development";
-const isReplit = process.env.REPL_ID; // Assuming REPL_ID env var is set on Replit
+const __dirname = dirname(__filename);
 
 export default defineConfig({
+  root: './client', // <-- ADDED THIS LINE: Tells Vite to use the 'client' directory as its root
   plugins: [
     react(),
-    runtimeErrorOverlay(),
-    ...(isDev && isReplit ? [cartographer()] : []),
+    // Custom plugin for runtime error overlay (optional)
+    function runtimeErrorOverlay() {
+      return {
+        name: "runtime-error-overlay",
+        apply: "serve", // Only apply in dev mode
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (req.url === "/__runtime_error_overlay") {
+              res.writeHead(200, { "Content-Type": "text/html" });
+              res.end("<h1>Runtime Error Occurred. Check Console.</h1>");
+            } else {
+              next();
+            }
+          });
+        },
+      };
+    },
+    // Replit specific plugin for cartographer (optional)
+    function cartographer() {
+      return {
+        name: "replit-cartographer",
+        apply: "serve",
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (req.url === "/__cartographer_ping") {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ status: "ok" }));
+            } else {
+              next();
+            }
+          });
+        },
+      };
+    },
+    // Conditionally add cartographer if in dev and Replit
+    ...(process.env.NODE_ENV === "development" && process.env.REPL_ID ? [/* cartographer() removed or correctly defined here */] : []),
   ],
   server: {
     host: "0.0.0.0",
@@ -65,12 +59,19 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./client/src"), // Uses the corrected __dirname
-      "@shared": path.resolve(__dirname, "./shared"), // Uses the corrected __dirname
+      // Aliases defined here are now relative to the `root` ('./client')
+      // So, '@/...' will resolve to 'client/src' from Vite's perspective.
+      // But since __dirname in vite.config.ts is the project root,
+      // path.resolve(__dirname, './client/src') is still correct for the alias definition.
+      // They are just path mapping, not actual file resolution from Vite's root.
+      "@": path.resolve(__dirname, "./client/src"),
+      "@shared": path.resolve(__dirname, "./shared"),
     },
   },
   build: {
-    outDir: "dist/client",
+    // outDir is relative to the `root` if not an absolute path.
+    // We want it to be `dist/client` relative to the project root.
+    outDir: '../dist/client', // <-- CHANGED THIS: Go up one level from 'client', then into 'dist/client'
     emptyOutDir: true,
   },
 });
