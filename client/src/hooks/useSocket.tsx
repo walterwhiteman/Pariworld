@@ -2,11 +2,11 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import io, { Socket, SocketOptions, ManagerOptions } from 'socket.io-client';
 // Use relative path to avoid potential alias resolution issues on Render
 // Also import SocketEventHandlers for strong typing the Socket instance
-import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat'; // <-- CHANGED THIS LINE
+import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat';
 
 // Define the shape of the context value
 interface SocketContextType {
-    socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined; // <-- CHANGED THIS LINE for strong typing
+    socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined;
     isConnected: boolean;
     connectionError: string | null;
     emit: (eventName: string, payload: any) => void;
@@ -29,7 +29,7 @@ interface SocketProviderProps {
 }
 
 export function SocketProvider({ children }: SocketProviderProps) {
-    const [socket, setSocket] = useState<Socket<SocketEventHandlers, SocketEventHandlers> | undefined>(undefined); // <-- CHANGED THIS LINE
+    const [socket, setSocket] = useState<Socket<SocketEventHandlers, SocketEventHandlers> | undefined>(undefined);
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
 
@@ -41,8 +41,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
         console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
         // Initialize Socket.IO client with the specified backend URL and path
         const socketInstance = io(BACKEND_URL, {
-            path: '/socket.io/', // Use the default Socket.IO path as requested
-            transports: ['polling', 'websocket'], // Prioritize polling for initial connection stability
+            path: '/ws', // <--- CHANGED: Aligning client path with backend's /ws
+            transports: ['polling', 'websocket'],
             withCredentials: true, // Important for CORS and session handling
             pingInterval: 30000, // Keep-alive ping interval
             pingTimeout: 25000,  // How long to wait for a pong before disconnecting
@@ -78,12 +78,12 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Event listener for connection errors
         socketInstance.on('connect_error', (error) => {
             console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
-                            error.message,
-                            'Description:', (error as any).description,
-                            'Type:', (error as any).type,
-                            'Event:', (error as any).event,
-                            'Reason:', (error as any).reason,
-                            error.stack);
+                                error.message,
+                                'Description:', (error as any).description,
+                                'Type:', (error as any).type,
+                                'Event:', (error as any).event,
+                                'Reason:', (error as any).reason,
+                                error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
             setIsConnected(false);
             setSocket(undefined);
