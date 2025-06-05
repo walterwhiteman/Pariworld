@@ -56,7 +56,7 @@ export interface SocketEventHandlers {
     [key: string]: (...args: any[]) => void;
 }
 
-// ADDED: SocketContextType is now defined here
+// ADDED: SocketContextType is now defined here, making it available to other modules
 export interface SocketContextType {
     socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined;
     isConnected: boolean;
