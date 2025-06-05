@@ -75,21 +75,29 @@ export interface NotificationData {
     duration?: number;
 }
 
-// Video call types (for WebRTC stretch goal)
+// Video call types (for WebRTC hook and components)
+// Ensure this matches the state properties managed by useWebRTC hook
 export interface VideoCallState {
-    isActive: boolean;
-    isLocalVideoEnabled: boolean;
-    isLocalAudioEnabled: boolean;
-    localStream: MediaStream | null;
-    remoteStream: MediaStream | null;
-    callDuration: number;
+    isActive: boolean; // Is a call currently active?
+    isInitiator: boolean; // Is this peer the one who initiated the call?
+    isRinging: boolean;   // Is there an incoming call ringing?
+    isAnswered: boolean;  // Has the incoming call been answered?
+    isLocalVideoEnabled: boolean; // Is local video currently enabled?
+    isLocalAudioEnabled: boolean; // Is local audio currently enabled?
+    localStream: MediaStream | null; // The local user's media stream
+    remoteStream: MediaStream | null; // The remote user's media stream
+    remoteUser: string | null; // Username of the remote participant
+    hasLocalStream: boolean; // Flag if local stream has been obtained
+    hasRemoteStream: boolean; // Flag if remote stream has been received
+    callDuration: number; // Call duration in seconds (will be formatted for display)
+    error: string | null; // Any WebRTC-related error message
 }
 
-// WebRTC signaling messages - Your provided interface is perfect for this.
+// WebRTC signaling messages
 export interface WebRTCSignal {
     type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end';
-    data: any;
+    data: any; // The actual SDP offer/answer or ICE candidate object
     roomId: string;
     sender: string;
-    recipient?: string; // ADDED: Recipient is used in the backend signal forwarding
+    recipient?: string; // Optional: used when signaling to a specific peer
 }
