@@ -40,9 +40,9 @@ export default function ChatPage() {
    * Add a notification
    */
   const addNotification = useCallback((
-    type: NotificationData['type'], 
-    title: string, 
-    message: string, 
+    type: NotificationData['type'],
+    title: string,
+    message: string,
     duration?: number
   ) => {
     const notification: NotificationData = {
@@ -52,7 +52,7 @@ export default function ChatPage() {
       message,
       duration
     };
-    
+
     setNotifications(prev => [...prev, notification]);
   }, []);
 
@@ -80,7 +80,7 @@ export default function ChatPage() {
     }
 
     setIsConnecting(true);
-    
+
     // Update room state
     setRoomState(prev => ({
       ...prev,
@@ -119,7 +119,7 @@ export default function ChatPage() {
     setIsRoomModalOpen(true);
     setIsConnecting(false);
     setTypingUser(undefined);
-    
+
     addNotification('info', 'Left Room', 'You have left the chat room');
   }, [roomState, socket, webRTC, addNotification]);
 
@@ -132,7 +132,9 @@ export default function ChatPage() {
       return;
     }
 
-    // Create complete message
+    // Create complete message (for optimistic UI update)
+    // The 'message' object received here already contains roomId and sender
+    // because MessageInput now correctly passes them.
     const completeMessage: ChatMessage = {
       ...message,
       id: generateMessageId(),
@@ -140,7 +142,7 @@ export default function ChatPage() {
       isSelf: true
     };
 
-    // Add to local messages immediately
+    // Add to local messages immediately for optimistic display
     setRoomState(prev => ({
       ...prev,
       messages: [...prev.messages, completeMessage]
@@ -177,16 +179,16 @@ export default function ChatPage() {
     // Room joined successfully
     const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
       console.log('Room joined successfully:', data);
-      
+
       setRoomState(prev => ({
         ...prev,
         isConnected: true,
         participants: data.participants
       }));
-      
+
       setIsRoomModalOpen(false);
       setIsConnecting(false);
-      
+
       // Add system message
       const systemMessage: ChatMessage = {
         id: generateMessageId(),
@@ -196,7 +198,7 @@ export default function ChatPage() {
         messageType: 'system',
         timestamp: new Date()
       };
-      
+
       setRoomState(prev => ({
         ...prev,
         messages: [...prev.messages, systemMessage]
@@ -206,13 +208,13 @@ export default function ChatPage() {
     // User left room
     const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
       console.log('User left room:', data);
-      
+
       if (data.username !== roomState.username) {
         setRoomState(prev => ({
           ...prev,
           participants: prev.participants.filter(p => p !== data.username)
         }));
-        
+
         // Add system message
         const systemMessage: ChatMessage = {
           id: generateMessageId(),
@@ -222,7 +224,7 @@ export default function ChatPage() {
           messageType: 'system',
           timestamp: new Date()
         };
-        
+
         setRoomState(prev => ({
           ...prev,
           messages: [...prev.messages, systemMessage]
@@ -233,15 +235,15 @@ export default function ChatPage() {
     // Message received
     const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
       console.log('Message received:', message);
-      
-      // Don't add our own messages again
+
+      // Don't add our own messages again (because we optimistically added them)
       if (message.sender === roomState.username) return;
-      
+
       const receivedMessage: ChatMessage = {
         ...message,
         isSelf: false
       };
-      
+
       setRoomState(prev => ({
         ...prev,
         messages: [...prev.messages, receivedMessage]
@@ -251,7 +253,7 @@ export default function ChatPage() {
     // User typing
     const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
       console.log('User typing:', data);
-      
+
       if (data.username !== roomState.username) {
         setTypingUser(data.isTyping ? data.username : undefined);
       }
@@ -260,7 +262,7 @@ export default function ChatPage() {
     // Connection status
     const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
       console.log('Connection status:', data);
-      
+
       setRoomState(prev => ({
         ...prev,
         isConnected: data.connected
@@ -270,7 +272,7 @@ export default function ChatPage() {
     // Error handling
     const unsubscribeError = socket.on('error', (data: { message: string }) => {
       console.error('Socket error:', data);
-      
+
       addNotification('error', 'Error', data.message);
       setIsConnecting(false);
     });
@@ -284,7 +286,7 @@ export default function ChatPage() {
       unsubscribeConnectionStatus();
       unsubscribeError();
     };
-  }, [socket, roomState.username]);
+  }, [socket, roomState.username]); // Added roomState.username to dependencies
 
   /**
    * Handle connection errors
@@ -294,7 +296,7 @@ export default function ChatPage() {
       addNotification('error', 'Connection Failed', socket.connectionError);
       setIsConnecting(false);
     }
-  }, [socket.connectionError]);
+  }, [socket.connectionError, addNotification]); // Added addNotification to dependencies
 
   /**
    * Temporarily override callState.isActive to false
@@ -337,6 +339,8 @@ export default function ChatPage() {
             onSendMessage={handleSendMessage}
             onTypingStart={handleTypingStart}
             onTypingStop={handleTypingStop}
+            roomId={roomState.roomId} // <--- ADDED THIS LINE
+            username={roomState.username} // <--- ADDED THIS LINE
             disabled={!roomState.isConnected}
           />
 
