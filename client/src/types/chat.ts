@@ -1,95 +1,142 @@
-// Chat message types
-export interface ChatMessage {
-    id: string; // CORRECT: This is now correctly 'string'
-    roomId: string;
-    sender: string;
-    content?: string;
-    imageData?: string;
-    messageType: 'text' | 'image' | 'system';
-    timestamp: Date;
-    isSelf?: boolean; // Your new addition, which is fine for frontend state
-}
+// src/pages/chat.tsx (ChatPage.tsx)
+import { useState, useCallback, useEffect, useRef } from 'react'; // Import useRef
+import { useLocation } from 'wouter'; // Import useLocation from wouter
 
-// Socket event NAMES (as an enum for runtime usage)
-export enum SocketEvents {
-    // Client to server events
-    JoinRoom = 'join-room',
-    LeaveRoom = 'leave-room',
-    SendMessage = 'send-message',
-    TypingStart = 'typing-start',
-    TypingStop = 'typing-stop',
-    WebRTCSignal = 'webrtc-signal', // ADDED: WebRTC signaling event
+import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
+import { ChatHeader } from '@/components/chat/ChatHeader';
+import { ChatMessages } from '@/components/chat/ChatMessages';
+import { MessageInput } from '@/components/chat/MessageInput';
+import { VideoCallModal } from '@/components/chat/VideoCallModal';
+import { VideoCallOverlay } from '@/components/chat/VideoCallOverlay'; // We will create this
+import { NotificationToast } from '@/components/chat/NotificationToast';
+import { useSocket } from '@/hooks/useSocket';
+import { useWebRTC } from '@/hooks/useWebRTC';
+import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
-    // Server to client events
-    ConnectionEstablished = 'connection-established', // ADDED: Event emitted on successful socket connection
-    RoomJoined = 'room-joined',
-    RoomLeft = 'room-left',
-    MessageReceived = 'message-received',
-    MessageHistory = 'message-history', // ADDED: From previous backend code, for initial messages
-    UserTyping = 'user-typing',
-    Error = 'error',
-    ConnectionStatus = 'connection-status',
-}
+export default function ChatPage() {
+  // ... (existing state variables)
 
-// Socket event HANDLERS (as an interface for type checking)
-export interface SocketEventHandlers {
-    // Client emits (to server)
-    'join-room': (data: { roomId: string; username: string }) => void;
-    'leave-room': (data: { roomId: string; username: string }) => void;
-    'send-message': (message: Omit<ChatMessage, 'id' | 'timestamp' | 'roomId' | 'sender'>) => void;
-    'typing-start': (data: { roomId: string; username: string }) => void;
-    'typing-stop': (data: { roomId: string; username: string }) => void;
-    'webrtc-signal': (payload: { roomId: string; sender: string; recipient: string; type: string; data: any }) => void; // ADDED: WebRTC signal payload
+  // New state for managing video call view mode
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const [location, setLocation] = useLocation(); // Hook to get current path
 
-    // Server emits (to client)
-    'connection-established': (payload: { connected: boolean }) => void; // ADDED: Event signature
-    'room-joined': (data: { roomId: string; participants: string[] }) => void;
-    'room-left': (data: { roomId: string; username: string }) => void;
-    'message-received': (message: ChatMessage) => void;
-    'message-history': (payload: { roomId: string; messages: ChatMessage[] }) => void; // ADDED: Event signature
-    'user-typing': (data: { username: string; isTyping: boolean }) => void;
-    'error': (data: { message: string }) => void;
-    'connection-status': (data: { connected: boolean; participantCount: number; username: string }) => void; // MODIFIED: Added username
-    'webrtc-signal': (payload: { roomId: string; sender: string; recipient: string; type: string; data: any }) => void; // ADDED: WebRTC signal payload
+  // Use current roomId and username from roomState for useWebRTC hook
+  const { roomId, username } = roomState;
+  const socket = useSocket();
+  const webRTC = useWebRTC(socket, roomId, username); // Pass directly
 
-    // Generic fallback for other events if needed, though specific is better
-    [key: string]: (...args: any[]) => void;
-}
+  // ... (existing utility functions like addNotification, dismissNotification, generateMessageId)
+
+  // ... (existing handleJoinRoom, handleLeaveRoom, handleSendMessage, handleTypingStart, handleTypingStop)
+
+  // Function to minimize the call
+  const minimizeCall = useCallback(() => {
+    if (webRTC.callState.isActive) {
+      setIsCallMinimized(true);
+    }
+  }, [webRTC.callState.isActive]);
+
+  // Function to expand the call back to full screen
+  const expandCall = useCallback(() => {
+    setIsCallMinimized(false);
+  }, []);
+
+  // Effect to handle navigation changes and minimize the call
+  useEffect(() => {
+    // If the call is active and we navigate away from the chat path ('/'), minimize it.
+    // Adjust this logic based on your specific routing needs.
+    // For a single-page app where chat is '/', navigating away means changing path.
+    // If your chat has sub-routes like '/chat/room/:id', adjust this condition.
+    if (webRTC.callState.isActive) {
+      // This effect runs on component mount and on location change.
+      // If the current path is NOT the root chat path (assuming / is chat)
+      // and the call is active, minimize it.
+      if (location !== '/') { // Assuming '/' is your main chat path
+        minimizeCall();
+      } else {
+        // If we navigate back to the chat path, ensure it's not minimized
+        expandCall();
+      }
+    }
+  }, [location, webRTC.callState.isActive, minimizeCall, expandCall]);
 
 
-// Room state
-export interface RoomState {
-    roomId: string;
-    username: string;
-    isConnected: boolean;
-    participants: string[];
-    messages: ChatMessage[];
-}
+  // ... (existing useEffect for socket event listeners)
 
-// Notification types
-export interface NotificationData {
-    id: string;
-    type: 'success' | 'error' | 'info' | 'warning';
-    title: string;
-    message: string;
-    duration?: number;
-}
+  // ... (existing useEffect for socket.connectionError)
 
-// Video call types (for WebRTC stretch goal)
-export interface VideoCallState {
-    isActive: boolean;
-    isLocalVideoEnabled: boolean;
-    isLocalAudioEnabled: boolean;
-    localStream: MediaStream | null;
-    remoteStream: MediaStream | null;
-    callDuration: number;
-}
+  // ... (existing useEffect for isCallActiveOverride)
 
-// WebRTC signaling messages - Your provided interface is perfect for this.
-export interface WebRTCSignal {
-    type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end';
-    data: any;
-    roomId: string;
-    sender: string;
-    recipient?: string; // ADDED: Recipient is used in the backend signal forwarding
+  return (
+    <div className="flex h-screen flex-col bg-gray-50">
+      {/* Room Join Modal */}
+      <RoomJoinModal
+        isOpen={isRoomModalOpen}
+        onJoinRoom={handleJoinRoom}
+        isConnecting={isConnecting}
+      />
+
+      {/* Main Chat Interface */}
+      {!isRoomModalOpen && (
+        <>
+          {/* Chat Header */}
+          <ChatHeader
+            roomId={roomState.roomId}
+            isConnected={roomState.isConnected}
+            participantCount={roomState.participants.length}
+            onStartVideoCall={webRTC.startCall}
+            onLeaveRoom={handleLeaveRoom}
+          />
+
+          {/* Chat Messages */}
+          <ChatMessages
+            messages={roomState.messages}
+            currentUsername={roomState.username}
+            typingUser={typingUser}
+          />
+
+          {/* Message Input */}
+          <MessageInput
+            onSendMessage={handleSendMessage}
+            onTypingStart={handleTypingStart}
+            onTypingStop={handleTypingStop}
+            roomId={roomState.roomId}
+            username={roomState.username}
+            disabled={!roomState.isConnected}
+          />
+
+          {/* Conditional Rendering of Video Call UI */}
+          {webRTC.callState.isActive && !isCallMinimized && (
+            <VideoCallModal
+              isOpen={true} // Only open if call is active and not minimized
+              callState={webRTC.callState}
+              localVideoRef={webRTC.localVideoRef}
+              remoteVideoRef={webRTC.remoteVideoRef}
+              onEndCall={webRTC.endCall}
+              onToggleVideo={webRTC.toggleVideo}
+              onToggleAudio={webRTC.toggleAudio}
+              formatCallDuration={webRTC.formatCallDuration}
+            />
+          )}
+
+          {/* Video Call Overlay (Minimized View) */}
+          {webRTC.callState.isActive && isCallMinimized && (
+            <VideoCallOverlay
+              callState={webRTC.callState}
+              localVideoRef={webRTC.localVideoRef}
+              remoteVideoRef={webRTC.remoteVideoRef}
+              onExpandCall={expandCall}
+              onEndCall={webRTC.endCall}
+            />
+          )}
+        </>
+      )}
+
+      {/* Notification Toasts */}
+      <NotificationToast
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
+    </div>
+  );
 }
