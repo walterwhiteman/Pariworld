@@ -1,280 +1,353 @@
 import type { Express } from "express";
-import { createServer, type Server as HttpServer } from "http";
-import { Server as SocketIOServer, Socket } from "socket.io"; // Import Socket.IO Server and Socket types
+import { createServer, type Server } from "http";
+// Import Socket.IO Server instead of ws
+import { Server as SocketIOServer } from 'socket.io'; // <--- NEW IMPORT
 import { storage } from "./storage";
-// RoomParticipant interface is still relevant if you're storing participants in your DB
-import { RoomParticipant } from "@shared/schema"; 
+import { RoomParticipant } from "@shared/schema";
 
-// Define ChatMessage interface for server use (remains the same)
+// Define ChatMessage interface for server use (unchanged)
 interface ChatMessage {
-  id: string;
-  roomId: string;
-  sender: string;
-  content?: string;
-  imageData?: string;
-  messageType: 'text' | 'image' | 'system';
-  timestamp: Date;
+    id: number;
+    roomId: string;
+    sender: string;
+    content?: string;
+    imageData?: string;
+    messageType: 'text' | 'image' | 'system';
+    timestamp: Date;
 }
 
-// Socket.IO does not need a generic WebSocketMessage interface like this.
-// Events are handled by their names.
+// WebSocket message types (now more aligned with Socket.IO emit structure)
+// No longer need WebSocketMessage, as Socket.IO uses direct events and payloads
 
-// Connected clients tracking is mostly handled by Socket.IO's internal state
-// but we might still want to store custom data on the socket itself or in a map.
-// For simplicity, we'll leverage socket.data for roomId and username.
+// Connected clients tracking (modified for Socket.IO sockets)
+// We'll track username to socket ID for direct messaging for WebRTC
+interface ConnectedClientInfo {
+    roomId: string;
+    username: string;
+    // We don't need 'ws' or 'isAlive' directly here, Socket.IO manages that
+}
+
+// Map to store username -> socket.id for WebRTC direct signaling
+const usernameToSocketIdMap = new Map<string, string>(); // username -> socket.id
 
 /**
- * Register HTTP routes and Socket.IO server for the private chat application
- * Implements real-time messaging using Socket.IO
+ * Register HTTP routes and WebSocket server for the private chat application
  */
-export async function registerRoutes(app: Express): Promise<HttpServer> {
-
-  // HTTP Routes for basic API endpoints (remain the same)
-
-  // Health check endpoint
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
-  // Get room info (optional - for future use)
-  app.get('/api/rooms/:roomId', async (req, res) => {
-    try {
-      const { roomId } = req.params;
-      const participants = await storage.getRoomParticipants(roomId);
-      const activeParticipants = participants.filter(p => p.isActive);
-
-      res.json({
-        roomId,
-        participantCount: activeParticipants.length,
-        participants: activeParticipants.map(p => p.username)
-      });
-    } catch (error) {
-      console.error('Error getting room info:', error);
-      res.status(500).json({ error: 'Failed to get room info' });
-    }
-  });
-
-  // Create HTTP server
-  const httpServer = createServer(app);
-
-  // --- Socket.IO server setup ---
-  const io = new SocketIOServer(httpServer, {
-    cors: {
-      origin: "https://pariworld.onrender.com", // Your Render frontend URL
-      methods: ["GET", "POST"],
-      credentials: true
-    },
-    path: '/socket.io/', // Ensure this matches your frontend client's path configuration
-    pingInterval: 30000, // Matching frontend client's ping interval
-    pingTimeout: 25000,  // Matching frontend client's ping timeout
-  });
-
-  // Helper function to get participants in a room based on connected sockets
-  const getSocketIORoomParticipants = (roomId: string): string[] => {
-    const participants: string[] = [];
-    // Iterate over sockets in the specified room
-    io.sockets.adapter.rooms.get(roomId)?.forEach(socketId => {
-      const socket = io.sockets.sockets.get(socketId);
-      if (socket && socket.data.username) {
-        participants.push(socket.data.username as string);
-      }
-    });
-    return participants;
-  };
-
-  // Helper function to get participant count in a room
-  const getSocketIORoomParticipantCount = (roomId: string): number => {
-    return io.sockets.adapter.rooms.get(roomId)?.size || 0;
-  };
-
-  /**
-   * Generate unique message ID (remains the same)
-   */
-  const generateMessageId = (): string => {
-    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  };
-
-  /**
-   * Handle Socket.IO connections
-   */
-  io.on('connection', (socket: Socket) => {
-    console.log(`New Socket.IO connection established: ${socket.id}`);
-
-    // Send connection confirmation (Socket.IO client automatically knows it's connected)
-    // You might still send a custom 'welcome' or 'connection-established' event if needed.
-    socket.emit('connection-established', { connected: true, socketId: socket.id });
-
-    /**
-     * Handle incoming messages (events)
-     */
-    socket.on('join-room', async ({ roomId, username }: { roomId: string, username: string }) => {
-      if (!roomId || !username) {
-        socket.emit('error', { message: 'Room ID and username are required' });
-        return;
-      }
-
-      // Store roomId and username on the socket itself for easy access
-      socket.data.roomId = roomId;
-      socket.data.username = username;
-
-      // Join the Socket.IO room
-      socket.join(roomId);
-      console.log(`Socket ${socket.id} (User: ${username}) joined room ${roomId}`);
-
-      // Store room participant in persistent storage
-      try {
-        await storage.addRoomParticipant(roomId, username);
-      } catch (error) {
-        console.error('Error storing room participant:', error);
-      }
-
-      // Get current participants from Socket.IO's state
-      const participantsInRoom = getSocketIORoomParticipants(roomId);
-      const participantCount = getSocketIORoomParticipantCount(roomId);
-
-      // Notify client of successful join
-      socket.emit('room-joined', {
-        roomId,
-        participants: participantsInRoom.filter(p => p !== username) // Exclude self
-      });
-
-      // Notify other room participants (excluding sender)
-      socket.to(roomId).emit('connection-status', {
-        connected: true,
-        participantCount
-      });
-
-      // Send a system message to others about the new user
-      socket.to(roomId).emit('message-received', {
-        id: generateMessageId(),
-        roomId,
-        sender: 'System',
-        content: `${username} joined the chat`,
-        messageType: 'system',
-        timestamp: new Date().toISOString()
-      });
+export async function registerRoutes(app: Express): Promise<Server> {
+    // --- HTTP Routes (unchanged) ---
+    app.get('/api/health', (req, res) => {
+        res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    socket.on('leave-room', async ({ roomId, username }: { roomId: string, username: string }) => {
-      // Check if the socket is actually in the room and matches the username
-      if (socket.data.roomId === roomId && socket.data.username === username) {
-        // Leave the Socket.IO room
-        socket.leave(roomId);
-        console.log(`Socket ${socket.id} (User: ${username}) left room ${roomId}`);
-
-        // Remove from persistent room participant tracking
+    app.get('/api/rooms/:roomId', async (req, res) => {
         try {
-          await storage.removeRoomParticipant(roomId, username);
-        } catch (error) {
-          console.error('Error removing room participant:', error);
-        }
+            const { roomId } = req.params;
+            const participants = await storage.getRoomParticipants(roomId);
+            const activeParticipants = participants.filter(p => p.isActive);
 
-        // Notify other participants in the room that the user left
-        io.to(roomId).emit('room-left', { roomId, username });
-        io.to(roomId).emit('connection-status', {
-          connected: true,
-          participantCount: getSocketIORoomParticipantCount(roomId)
+            // Fetch currently online participants from Socket.IO's perspective
+            const onlineParticipants: string[] = [];
+            // Iterate through our map to find users in this roomId
+            usernameToSocketIdMap.forEach((socketId, username) => {
+                // Check if this socket is still connected to the room in Socket.IO
+                // (io.sockets.adapter.rooms.get(roomId)?.has(socketId) would be ideal but more complex
+                // for this specific setup where we don't have direct access to 'io' yet)
+                // For simplicity, we'll rely on our map being updated on join/disconnect.
+                // A more robust solution might cross-reference with Socket.IO's internal rooms.
+                if (usernameToSocketIdMap.get(username) === socketId) { // Basic check if mapping is consistent
+                    onlineParticipants.push(username);
+                }
+            });
+
+            res.json({
+                roomId,
+                // Consider participantCount to be only online users
+                participantCount: onlineParticipants.length,
+                participants: onlineParticipants
+            });
+        } catch (error) {
+            console.error('Error getting room info:', error);
+            res.status(500).json({ error: 'Failed to get room info' });
+        }
+    });
+
+    const httpServer = createServer(app);
+
+    // Initialize Socket.IO Server
+    const io = new SocketIOServer(httpServer, {
+        path: '/ws', // Matches the path your frontend expects
+        cors: {
+            origin: "https://pariworld.onrender.com", // <<<< IMPORTANT: ENSURE THIS MATCHES YOUR FRONTEND URL
+            methods: ["GET", "POST"] // Allowed methods for CORS preflight
+        }
+    });
+
+    // Helper functions (now using Socket.IO methods)
+    // Socket.IO manages rooms and client sending directly
+    // We will update the usage of these in the 'message' handler
+    const getRoomParticipantCount = (roomId: string): number => {
+        // Socket.IO rooms directly give us this
+        return io.sockets.adapter.rooms.get(roomId)?.size || 0;
+    };
+
+    const getRoomParticipants = (roomId: string): string[] => {
+        const participants: string[] = [];
+        // Iterate through our usernameToSocketIdMap to find users in this roomId
+        usernameToSocketIdMap.forEach((socketId, username) => {
+            // Check if this socket is actually in the room (Socket.IO's internal check)
+            if (io.sockets.adapter.rooms.get(roomId)?.has(socketId)) {
+                 participants.push(username);
+            }
+        });
+        return participants;
+    };
+
+    const generateMessageId = (): string => {
+        return `temp_msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    };
+
+    // --- Socket.IO Connection Handling ---
+    io.on('connection', (socket) => {
+        console.log('New Socket.IO connection established:', socket.id);
+
+        // Send connection confirmation
+        socket.emit('connection-established', { connected: true });
+
+        socket.on('join-room', async (payload: { roomId: string, username: string }) => {
+            const { roomId, username } = payload;
+
+            if (!roomId || !username) {
+                socket.emit('error', { message: 'Room ID and username are required' });
+                return;
+            }
+
+            // Join the Socket.IO room
+            socket.join(roomId);
+
+            // Store client info in our map for direct signaling
+            usernameToSocketIdMap.set(username, socket.id);
+            console.log(`User ${username} (Socket ID: ${socket.id}) joined room ${roomId}`);
+
+            // Store room participant in DB
+            try {
+                await storage.addRoomParticipant(roomId, username);
+            } catch (error) {
+                console.error('Error storing room participant:', error);
+            }
+
+            // --- Fetch and send previous messages to the joining client ---
+            try {
+                const previousMessages = await storage.getMessages(roomId, 50);
+                if (previousMessages.length > 0) {
+                    console.log(`Sending ${previousMessages.length} historical messages to ${username} in ${roomId}`);
+                    socket.emit('message-history', {
+                        roomId,
+                        messages: previousMessages.map(msg => ({
+                            ...msg,
+                            timestamp: msg.timestamp.toISOString()
+                        }))
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching previous messages:', error);
+            }
+
+            // Notify client of successful join
+            socket.emit('room-joined', {
+                roomId,
+                participants: getRoomParticipants(roomId).filter(p => p !== username)
+            });
+
+            // Notify others in the room about new connection status
+            io.to(roomId).emit('connection-status', {
+                connected: true,
+                participantCount: getRoomParticipantCount(roomId),
+                username: username // Send the joining username for better UI updates
+            });
+
+            // Send a system message to others about the new user
+            io.to(roomId).emit('message-received', {
+                roomId,
+                sender: 'System',
+                content: `${username} joined the chat`,
+                messageType: 'system',
+                timestamp: new Date().toISOString()
+            });
         });
 
-        // Clear socket data
-        socket.data.roomId = undefined;
-        socket.data.username = undefined;
-      }
-    });
+        socket.on('leave-room', async (payload: { roomId: string, username: string }) => {
+            const { roomId, username } = payload;
 
-    socket.on('send-message', async (messageData: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-      const { roomId, username } = socket.data; // Get current room/user from socket data
+            if (usernameToSocketIdMap.get(username) === socket.id) { // Ensure correct client is leaving
+                socket.leave(roomId); // Leave Socket.IO room
+                usernameToSocketIdMap.delete(username); // Remove from our map
 
-      if (!roomId || !username) {
-        socket.emit('error', { message: 'Must join a room first to send messages' });
-        return;
-      }
+                try {
+                    await storage.removeRoomParticipant(roomId, username);
+                } catch (error) {
+                    console.error('Error removing room participant:', error);
+                }
 
-      // Create complete message
-      const completeMessage: ChatMessage = {
-        id: generateMessageId(),
-        roomId: roomId,
-        sender: username,
-        content: messageData.content,
-        imageData: messageData.imageData,
-        messageType: messageData.messageType || 'text',
-        timestamp: new Date()
-      };
-
-      // Store message (optional - for message history)
-      try {
-        await storage.addMessage(completeMessage);
-      } catch (error) {
-        console.error('Error storing message:', error);
-      }
-
-      // Broadcast to room participants (including sender, unless you explicitly want to exclude them)
-      // If you want to exclude sender: socket.to(roomId).emit('message-received', ...)
-      io.to(roomId).emit('message-received', {
-        ...completeMessage,
-        timestamp: completeMessage.timestamp.toISOString() // Ensure ISO string for client
-      });
-
-      console.log(`Message sent in room ${roomId} by ${username}`);
-    });
-
-    socket.on('typing-start', ({ roomId, username }: { roomId: string, username: string }) => {
-      // Broadcast to others in the room (excluding sender)
-      socket.to(roomId).emit('user-typing', { username, isTyping: true });
-    });
-
-    socket.on('typing-stop', ({ roomId, username }: { roomId: string, username: string }) => {
-      // Broadcast to others in the room (excluding sender)
-      socket.to(roomId).emit('user-typing', { username, isTyping: false });
-    });
-
-    // WebRTC signaling for video calls (stretch goal) - events remain the same
-    socket.on('webrtc-signal', ({ roomId, sender, type, data: signalData }: { roomId: string, sender: string, type: string, data: any }) => {
-      // Assuming sender is the current socket's username, validate if needed
-      if (socket.data.roomId === roomId && socket.data.username === sender) {
-        // Relay to other participants in the room (excluding sender)
-        socket.to(roomId).emit('webrtc-signal', { roomId, sender, type, data: signalData });
-      }
-    });
-
-    // Handle Socket.IO disconnection
-    socket.on('disconnect', async (reason) => {
-      const { roomId, username } = socket.data; // Retrieve data stored on the socket
-      console.log(`Socket ${socket.id} disconnected (Reason: ${reason}). User: ${username}, Room: ${roomId}`);
-
-      if (roomId && username) {
-        // Remove from persistent room participant tracking
-        try {
-          await storage.removeRoomParticipant(roomId, username);
-        } catch (error) {
-          console.error('Error removing room participant on disconnect:', error);
-        }
-
-        // Notify other participants in the room that the user left
-        io.to(roomId).emit('room-left', { roomId, username });
-        io.to(roomId).emit('connection-status', {
-          connected: true,
-          participantCount: getSocketIORoomParticipantCount(roomId)
+                io.to(roomId).emit('room-left', { roomId, username }); // Notify others
+                io.to(roomId).emit('connection-status', {
+                    connected: true,
+                    participantCount: getRoomParticipantCount(roomId),
+                    username: username // Send the leaving username
+                });
+                console.log(`User ${username} left room ${roomId}`);
+            }
         });
-        console.log(`User ${username} disconnected from room ${roomId}`);
-      }
+
+        socket.on('send-message', async (messageData: { content?: string, imageData?: string, messageType?: 'text' | 'image' | 'system' }) => {
+            // Get roomId and username from our map, since Socket.IO doesn't automatically expose it this way
+            // You might need a more robust way to associate socket.id with roomId and username
+            // A common pattern is to store this in a 'socket.data' object on connection or room join.
+            // For now, let's assume we can get it from the map, or from `socket.handshake.auth` if passed during connection.
+            // Let's ensure the `join-room` event sets these on the `socket` object for easier access.
+            const { roomId, username } = socket.data; // Assumes `socket.data` is set on join
+
+            if (!roomId || !username) {
+                socket.emit('error', { message: 'Must join a room first' });
+                return;
+            }
+
+            const completeMessage: Omit<ChatMessage, 'id' | 'timestamp'> = {
+                roomId,
+                sender: username,
+                content: messageData.content,
+                imageData: messageData.imageData,
+                messageType: messageData.messageType || 'text',
+            };
+
+            try {
+                await storage.addMessage(completeMessage);
+            } catch (error) {
+                console.error('Error storing message:', error);
+            }
+
+            // Broadcast to room participants (including sender)
+            io.to(roomId).emit('message-received', {
+                id: generateMessageId(), // Still using temp ID for immediate broadcast
+                roomId,
+                sender: username,
+                content: messageData.content,
+                imageData: messageData.imageData,
+                messageType: messageData.messageType || 'text',
+                timestamp: new Date().toISOString()
+            });
+
+            console.log(`Message sent in room ${roomId} by ${username}`);
+        });
+
+        socket.on('typing-start', (payload: { roomId: string, username: string }) => {
+            const { roomId, username } = payload;
+            // Broadcast to all in the room EXCEPT the sender
+            socket.to(roomId).emit('user-typing', { username, isTyping: true });
+        });
+
+        socket.on('typing-stop', (payload: { roomId: string, username: string }) => {
+            const { roomId, username } = payload;
+            // Broadcast to all in the room EXCEPT the sender
+            socket.to(roomId).emit('user-typing', { username, isTyping: false });
+        });
+
+        // --- NEW: WebRTC Signaling Event Handler ---
+        socket.on('webrtc-signal', (payload: { roomId: string, sender: string, recipient: string, type: string, data: any }) => {
+            const { roomId, sender, recipient, type, data } = payload;
+
+            // Find the recipient's socket ID using our map
+            const recipientSocketId = usernameToSocketIdMap.get(recipient);
+
+            if (recipientSocketId && recipientSocketId !== socket.id) { // Ensure recipient is online and not self
+                // Emit the signal directly to the recipient's socket
+                io.to(recipientSocketId).emit('webrtc-signal', {
+                    roomId,
+                    sender,
+                    recipient, // Keep recipient in payload for frontend validation
+                    type,
+                    data
+                });
+                console.log(`Forwarded WebRTC signal type '${type}' from '${sender}' to '${recipient}' (Socket ID: ${recipientSocketId}) in room ${roomId}`);
+            } else if (recipientSocketId === socket.id) {
+                console.warn(`Attempted to send WebRTC signal to self from ${sender}. Ignoring.`);
+                // Optionally, inform the sender that they can't call themselves.
+            } else {
+                console.warn(`Recipient '${recipient}' not found or not online for WebRTC signal from ${sender}.`);
+                // Optionally, send an error back to the sender
+                socket.emit('error', { message: `Recipient '${recipient}' is not online or available.` });
+            }
+        });
+        // --- END NEW WEBRTC SIGNALING ---
+
+
+        // --- Socket.IO Disconnect Handling ---
+        socket.on('disconnect', async () => {
+            console.log('Socket.IO connection closed:', socket.id);
+
+            // Find the client info from our map based on socket.id
+            let disconnectedUsername: string | undefined;
+            let disconnectedRoomId: string | undefined;
+
+            // Iterate through the map to find the entry by value (socket.id)
+            for (const [username, sockId] of usernameToSocketIdMap.entries()) {
+                if (sockId === socket.id) {
+                    disconnectedUsername = username;
+                    disconnectedRoomId = socket.data.roomId; // Get roomId from socket.data
+                    usernameToSocketIdMap.delete(username); // Remove from our map
+                    break;
+                }
+            }
+
+            if (disconnectedRoomId && disconnectedUsername) {
+                try {
+                    await storage.removeRoomParticipant(disconnectedRoomId, disconnectedUsername);
+                } catch (error) {
+                    console.error('Error removing room participant on disconnect:', error);
+                }
+
+                // Notify others in the room about the user leaving
+                io.to(disconnectedRoomId).emit('room-left', { roomId: disconnectedRoomId, username: disconnectedUsername });
+                io.to(disconnectedRoomId).emit('connection-status', {
+                    connected: true,
+                    participantCount: getRoomParticipantCount(disconnectedRoomId),
+                    username: disconnectedUsername // Send the leaving username
+                });
+                console.log(`User ${disconnectedUsername} disconnected from room ${disconnectedRoomId}`);
+            }
+        });
+
+        // Add a handler for `socket.data` to store room and username
+        // This is a more robust way to access client info associated with the socket
+        socket.on('set-socket-data', (data: { roomId: string; username: string }) => {
+            socket.data.roomId = data.roomId;
+            socket.data.username = data.username;
+        });
+
     });
 
-    // Handle Socket.IO connection errors (e.g., transport errors)
-    socket.on('connect_error', (err) => {
-      console.error(`Socket.IO connect_error for ${socket.id}: ${err.message}`);
+    // Cleanup heartbeat interval (Socket.IO has its own ping/pong, so less manual needed)
+    // You can remove your custom heartbeatInterval if Socket.IO's default is sufficient,
+    // or keep it if you need more explicit control. For now, let's keep it for compatibility.
+    // However, the `clients` map is no longer relevant for the heartbeat, `io.sockets.sockets` holds active sockets.
+    // Let's simplify and rely on Socket.IO's built-in mechanisms.
+    // No explicit heartbeat loop is typically needed with Socket.IO; it handles ping/pong automatically.
+
+    console.log('Socket.IO server initialized on /ws path');
+
+    // --- Periodic cleanup of old messages (unchanged) ---
+    const cleanupInterval = setInterval(async () => {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        try {
+            await storage.deleteOldMessages(twentyFourHoursAgo);
+        } catch (error) {
+            console.error('Error during message cleanup:', error);
+        }
+    }, 60 * 60 * 1000); // Run this cleanup function every 1 hour (3600000 ms)
+
+    // Ensure cleanup interval is cleared on server close
+    httpServer.on('close', () => { // Attach to httpServer close
+        clearInterval(cleanupInterval);
     });
 
-    // Handle any general Socket.IO errors
-    socket.on('error', (err) => {
-      console.error(`Socket.IO error for ${socket.id}: ${err.message}`);
-    });
-  });
-
-  // With Socket.IO, you don't need the manual ping/pong interval or the 'isAlive' tracking.
-  // Socket.IO handles the heartbeat mechanism internally.
-
-  console.log('Socket.IO server initialized on /socket.io/ path');
-
-  return httpServer;
+    return httpServer;
 }
