@@ -106,7 +106,6 @@
     "@types/recharts": "^2.0.0",
     "@types/vaul": "^1.0.0",
     "@types/react-hook-form": "^7.49.0",
-    "@types/input-otp": "^1.0.0",
     "@types/react-resizable-panels": "^2.0.0"
   },
   "optionalDependencies": {
