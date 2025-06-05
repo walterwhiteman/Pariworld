@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 // Import VideoCallState and WebRTCSignal from types/chat
 import { VideoCallState, WebRTCSignal } from '@/types/chat';
-// Import SocketContextType from useSocket.ts, as it's defined and exported there now
-import { SocketContextType } from '../hooks/useSocket'; // <--- CORRECTED IMPORT
+// Import useSocket hook itself, not just its type
+import { useSocket } from '../hooks/useSocket'; // <--- UPDATED IMPORT
 
 /**
  * Custom hook for WebRTC video calling functionality
  * Implements peer-to-peer video communication for the chat application
  */
 export function useWebRTC(
-  // Revert to SocketContextType, as it's now imported correctly
-  socket: SocketContextType, // <--- CORRECTED: Using SocketContextType
+  // REMOVED: socket: SocketContextType is no longer a parameter
   roomId: string,
   username: string,
   localVideoRef: React.RefObject<HTMLVideoElement>,
   remoteVideoRef: React.RefObject<HTMLVideoElement>
 ) {
+  // NEW: Get socket instance directly inside the hook
+  const socket = useSocket(); // <--- Get socket here
+
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
     isInitiator: false,
@@ -49,8 +51,9 @@ export function useWebRTC(
       peerConnectionRef.current = peerConnection;
 
       peerConnection.onicecandidate = (event) => {
-        if (event.candidate && socket?.emit) {
-          socket.emit('webrtc-signal', {
+        // Use socket?.socket?.emit here as useSocket returns the context object
+        if (event.candidate && socket?.socket?.emit) {
+          socket.socket.emit('webrtc-signal', {
             type: 'ice-candidate',
             data: event.candidate,
             roomId,
@@ -127,8 +130,9 @@ export function useWebRTC(
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
 
-      if (socket?.emit) {
-        socket.emit('webrtc-signal', {
+      // Use socket?.socket?.emit here
+      if (socket?.socket?.emit) {
+        socket.socket.emit('webrtc-signal', {
           type: 'offer',
           data: offer,
           roomId,
@@ -179,8 +183,9 @@ export function useWebRTC(
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
-      if (socket?.emit) {
-        socket.emit('webrtc-signal', {
+      // Use socket?.socket?.emit here
+      if (socket?.socket?.emit) {
+        socket.socket.emit('webrtc-signal', {
           type: 'answer',
           data: answer,
           roomId,
@@ -236,8 +241,9 @@ export function useWebRTC(
       remoteVideoRef.current.srcObject = null;
     }
 
-    if (socket?.emit && callState.isActive) {
-      socket.emit('webrtc-signal', {
+    // Use socket?.socket?.emit here
+    if (socket?.socket?.emit && callState.isActive) {
+      socket.socket.emit('webrtc-signal', {
         type: 'call-end',
         data: {},
         roomId,
@@ -310,7 +316,8 @@ export function useWebRTC(
   }, []);
 
   useEffect(() => {
-    if (!socket?.on) return;
+    // Check if socket.socket is available before attaching listener
+    if (!socket?.socket?.on) return; // <--- CRITICAL CHECK: Ensure actual socket instance is available
 
     const handleWebRTCSignal = async (signal: WebRTCSignal) => {
       if (signal.roomId !== roomId || signal.sender === username) return;
@@ -360,9 +367,9 @@ export function useWebRTC(
       }
     };
 
-    const cleanup = socket.on('webrtc-signal', handleWebRTCSignal);
+    const cleanup = socket.socket.on('webrtc-signal', handleWebRTCSignal); // <--- Use socket.socket.on
     return cleanup;
-  }, [socket, roomId, username, answerCall, endCall]);
+  }, [socket.socket, roomId, username, answerCall, endCall]); // Add socket.socket to dependencies
 
   useEffect(() => {
     return () => {
