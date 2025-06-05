@@ -5,12 +5,16 @@ import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { VideoCallModal } from '@/components/chat/VideoCallModal';
-import { VideoCallOverlay } from '@/components/chat/VideoCallOverlay';
+// Removed VideoCallModal and VideoCallOverlay imports
+// import { VideoCallModal } from '@/components/chat/VideoCallModal';
+// import { VideoCallOverlay } from '@/components/chat/VideoCallOverlay';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
-import { useWebRTC } from '@/hooks/useWebRTC';
-import { ChatMessage, NotificationData, RoomState, VideoCallState } from '@/types/chat';
+// Removed useWebRTC import
+// import { useWebRTC } from '@/hooks/useWebRTC';
+import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
+// Removed VideoCallState import
+// import { VideoCallState } from '@/types/chat';
 
 export default function ChatPage() {
   const [roomState, setRoomState] = useState<RoomState>({
@@ -26,16 +30,17 @@ export default function ChatPage() {
   const [typingUser, setTypingUser] = useState<string | undefined>();
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
-  const [isCallMinimized, setIsCallMinimized] = useState(false);
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  // Removed isCallMinimized state and video refs
+  // const [isCallMinimized, setIsCallMinimized] = useState(false);
+  // const localVideoRef = useRef<HTMLVideoElement>(null);
+  // const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
   const [location] = useLocation();
 
   const socket = useSocket(); // Get socket context here
 
-  // Call useWebRTC without passing 'socket' as a parameter
-  const webRTC = useWebRTC(roomState.roomId, roomState.username, localVideoRef, remoteVideoRef); // <--- CORRECTED CALL
+  // Removed useWebRTC hook call
+  // const webRTC = useWebRTC(roomState.roomId, roomState.username, localVideoRef, remoteVideoRef);
 
   const addNotification = useCallback((
     type: NotificationData['type'],
@@ -86,9 +91,10 @@ export default function ChatPage() {
       socket.leaveRoom(roomState.roomId, roomState.username);
     }
 
-    if (webRTC.callState.isActive) {
-      webRTC.endCall();
-    }
+    // Removed webRTC.endCall() call
+    // if (webRTC.callState.isActive) {
+    //   webRTC.endCall();
+    // }
 
     setRoomState({
       roomId: '',
@@ -101,10 +107,11 @@ export default function ChatPage() {
     setIsRoomModalOpen(true);
     setIsConnecting(false);
     setTypingUser(undefined);
-    setIsCallMinimized(false);
+    // Removed setIsCallMinimized(false);
+    // setIsCallMinimized(false);
 
     addNotification('info', 'Left Room', 'You have left the chat room');
-  }, [roomState, socket, webRTC, addNotification]);
+  }, [roomState, socket, addNotification]); // Removed webRTC from dependencies
 
   const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
     if (!roomState.isConnected || !socket.socket) {
@@ -139,15 +146,16 @@ export default function ChatPage() {
     }
   }, [roomState, socket]);
 
-  const minimizeCall = useCallback(() => {
-    if (webRTC.callState.isActive) {
-      setIsCallMinimized(true);
-    }
-  }, [webRTC.callState.isActive]);
+  // Removed minimizeCall and expandCall functions
+  // const minimizeCall = useCallback(() => {
+  //   if (webRTC.callState.isActive) {
+  //     setIsCallMinimized(true);
+  //   }
+  // }, [webRTC.callState.isActive]);
 
-  const expandCall = useCallback(() => {
-    setIsCallMinimized(false);
-  }, []);
+  // const expandCall = useCallback(() => {
+  //   setIsCallMinimized(false);
+  // }, []);
 
   useEffect(() => {
     if (!socket.socket) {
@@ -294,7 +302,8 @@ export default function ChatPage() {
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
-            onStartVideoCall={webRTC.startCall}
+            // Removed onStartVideoCall prop
+            // onStartVideoCall={webRTC.startCall}
             onLeaveRoom={handleLeaveRoom}
           />
 
@@ -313,7 +322,8 @@ export default function ChatPage() {
             disabled={!roomState.isConnected}
           />
 
-          {webRTC.callState.isActive && !isCallMinimized && (
+          {/* Removed VideoCallModal and VideoCallOverlay rendering */}
+          {/* {webRTC.callState.isActive && !isCallMinimized && (
             <VideoCallModal
               isOpen={true}
               callState={webRTC.callState}
@@ -335,7 +345,7 @@ export default function ChatPage() {
               onExpandCall={expandCall}
               onEndCall={webRTC.endCall}
             />
-          )}
+          )} */}
         </>
       )}
 
