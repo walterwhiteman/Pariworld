@@ -1,11 +1,22 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import io, { Socket, SocketOptions, ManagerOptions } from 'socket.io-client';
-// Import SocketContextType from types/chat, along with other types
-import { ChatMessage, SocketEvents, SocketEventHandlers, SocketContextType } from '../types/chat'; // <--- CORRECTED IMPORT
+// Only import ChatMessage, SocketEvents, SocketEventHandlers from types/chat
+import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat'; // REMOVED: SocketContextType from here
 
-// REMOVED: SocketContextType definition is now in types/chat.ts
+// Define the shape of the context value here, and export it
+export interface SocketContextType { // EXPORTED here
+    socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined;
+    isConnected: boolean;
+    connectionError: string | null;
+    emit: (eventName: string, payload: any) => void;
+    on: (eventName: string, handler: (...args: any[]) => void) => () => void;
+    joinRoom: (roomId: string, username: string) => void;
+    leaveRoom: (roomId: string, username: string) => void;
+    sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
+    sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
+}
 
-// Create the context with an initial undefined value using the imported type
+// Create the context with an initial undefined value
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 /**
