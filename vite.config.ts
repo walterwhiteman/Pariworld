@@ -1,10 +1,10 @@
-import { defineConfig } => "vite";
+import { defineConfig } from "vite"; // <-- Corrected this line
 import react from "@vitejs/plugin-react";
 import path from "path";
 
 // Corrected Cartographer plugin import to use named export
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-import { cartographer } from "@replit/vite-plugin-cartographer"; // <-- Corrected line
+import { cartographer } from "@replit/vite-plugin-cartographer";
 
 const isReplit = process.env.REPL_ID !== undefined;
 const isDev = process.env.NODE_ENV !== "production";
