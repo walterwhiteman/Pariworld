@@ -56,6 +56,19 @@ export interface SocketEventHandlers {
     [key: string]: (...args: any[]) => void;
 }
 
+// ADDED: SocketContextType is now defined here
+export interface SocketContextType {
+    socket: Socket<SocketEventHandlers, SocketEventHandlers> | undefined;
+    isConnected: boolean;
+    connectionError: string | null;
+    emit: (eventName: string, payload: any) => void;
+    on: (eventName: string, handler: (...args: any[]) => void) => () => void;
+    joinRoom: (roomId: string, username: string) => void;
+    leaveRoom: (roomId: string, username: string) => void;
+    sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
+    sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
+}
+
 
 // Room state
 export interface RoomState {
@@ -76,7 +89,6 @@ export interface NotificationData {
 }
 
 // Video call types (for WebRTC hook and components)
-// Ensure this matches the state properties managed by useWebRTC hook
 export interface VideoCallState {
     isActive: boolean; // Is a call currently active?
     isInitiator: boolean; // Is this peer the one who initiated the call?
