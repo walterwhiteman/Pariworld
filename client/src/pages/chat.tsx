@@ -1,30 +1,19 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { useLocation } from 'wouter';
-
+import { useState, useCallback, useEffect } from 'react';
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
+import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
+import { useWebRTC } from '@/hooks/useWebRTC';
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
-// Import Firebase modules
-import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, Auth, User } from 'firebase/auth';
-import {
-  getFirestore, Firestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp,
-  QueryDocumentSnapshot, DocumentData, limit
-} from 'firebase/firestore';
-
+/**
+ * Main chat page component that orchestrates the entire chat application
+ * Manages room state, messaging, notifications, and video calling
+ */
 export default function ChatPage() {
-  // Firebase State
-  const [app, setApp] = useState<FirebaseApp | null>(null);
-  const [db, setDb] = useState<Firestore | null>(null);
-  const [auth, setAuth] = useState<Auth | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-
   // Room and user state
   const [roomState, setRoomState] = useState<RoomState>({
     roomId: '',
@@ -40,12 +29,15 @@ export default function ChatPage() {
   const [typingUser, setTypingUser] = useState<string | undefined>();
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
-  const [location] = useLocation();
+  // Override for temporarily silencing the video call state and UI
+  const [isCallActiveOverride, setIsCallActiveOverride] = useState(false);
 
+  // Hooks
   const socket = useSocket();
+  const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
 
   /**
-   * Add a notification toast
+   * Add a notification
    */
   const addNotification = useCallback((
     type: NotificationData['type'],
@@ -60,189 +52,62 @@ export default function ChatPage() {
       message,
       duration
     };
+
     setNotifications(prev => [...prev, notification]);
   }, []);
 
   /**
-   * Dismiss a notification toast
+   * Dismiss a notification
    */
   const dismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
   /**
-   * Generate a unique client-side message ID for optimistic updates.
-   * Note: Firestore will generate its own document ID.
+   * Generate a unique message ID
    */
-  const generateClientMessageId = useCallback((): string => {
-    return `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }, []);
+  const generateMessageId = (): string => {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  };
 
   /**
-   * Initialize Firebase app and authenticate the user.
-   * This runs once on component mount.
+   * Join a chat room
    */
-  useEffect(() => {
-    let firebaseAppInstance: FirebaseApp;
-    let authInstance: Auth;
-    let firestoreDbInstance: Firestore;
-
-    try {
-      if (!app) {
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; // Use default if not provided
-
-        // DIAGNOSTIC LOG: Log the config being used
-        console.log('Firebase Config being used:', firebaseConfig);
-        console.log('App ID being used:', appId);
-        console.log('Initial Auth Token present:', initialAuthToken ? 'Yes' : 'No');
-
-        firebaseAppInstance = initializeApp(firebaseConfig);
-        firestoreDbInstance = getFirestore(firebaseAppInstance);
-        authInstance = getAuth(firebaseAppInstance);
-
-        setApp(firebaseAppInstance);
-        setDb(firestoreDbInstance);
-        setAuth(authInstance);
-
-        if (initialAuthToken) {
-          signInWithCustomToken(authInstance, initialAuthToken)
-            .then((userCredential) => {
-              console.log('Firebase signed in with custom token:', userCredential.user.uid);
-              setUserId(userCredential.user.uid);
-              setIsAuthReady(true);
-            })
-            .catch((error) => {
-              console.error('Error signing in with custom token, falling back to anonymous:', error);
-              signInAnonymously(authInstance)
-                .then((anonUserCredential) => {
-                  console.log('Firebase signed in anonymously:', anonUserCredential.user.uid);
-                  setUserId(anonUserCredential.user.uid);
-                  setIsAuthReady(true);
-                })
-                .catch((anonError) => {
-                  console.error('Error signing in anonymously (fallback failed):', anonError);
-                  addNotification('error', 'Auth Error', 'Failed to authenticate. Please refresh.');
-                  setIsAuthReady(false);
-                });
-            });
-        } else {
-          signInAnonymously(authInstance)
-            .then((userCredential) => {
-              console.log('Firebase signed in anonymously:', userCredential.user.uid);
-              setUserId(userCredential.user.uid);
-              setIsAuthReady(true);
-            })
-            .catch((error) => {
-              console.error('Error signing in anonymously:', error);
-              addNotification('error', 'Auth Error', 'Failed to authenticate. Please refresh.');
-              setIsAuthReady(false);
-            });
-        }
-      }
-    } catch (error) {
-      console.error('Firebase initialization error:', error);
-      // More specific error message for Firebase config
-      if (error instanceof Error && error.message.includes("projectId")) {
-        addNotification('error', 'Firebase Config Error', 'Firebase "projectId" is missing or invalid.');
-      } else {
-        addNotification('error', 'Firebase Error', 'Failed to initialize Firebase.');
-      }
-    }
-  }, [addNotification, app]);
-
-  /**
-   * Handle joining a chat room.
-   * Now integrates Firestore for message history.
-   */
-  const handleJoinRoom = useCallback(async (roomId: string, username: string) => {
-    if (!socket.isConnected || !socket.socket) {
-      addNotification('error', 'Connection Error', 'Unable to connect to chat server (Socket not ready)');
-      return;
-    }
-    if (!isAuthReady || !db || !userId) {
-      addNotification('error', 'Auth/DB Error', 'Authentication or database not ready.');
+  const handleJoinRoom = useCallback((roomId: string, username: string) => {
+    if (!socket.isConnected) {
+      addNotification('error', 'Connection Error', 'Unable to connect to chat server');
       return;
     }
 
     setIsConnecting(true);
 
-    // Reset messages and update room state with new room ID and username
+    // Update room state
     setRoomState(prev => ({
       ...prev,
       roomId,
       username,
       isConnected: false,
-      messages: [] // Clear messages on join
+      messages: []
     }));
 
+    // Join room via socket
     socket.joinRoom(roomId, username);
-
-    // --- Firestore Message History ---
-    // Ensure __app_id is used for the collection path as per security rules
-    const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    const messagesCollectionRef = collection(db, `artifacts/${currentAppId}/public/data/chat_messages`);
-    const q = query(
-      messagesCollectionRef,
-      // Temporarily removed orderBy and limit to fetch all for in-memory sorting
-      // This is a workaround for typical Firestore index requirements on complex queries in Canvas.
-    );
-
-    // Attach real-time listener for messages
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const newMessages: ChatMessage[] = [];
-        snapshot.docs.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-            const data = doc.data();
-            // Filter messages for the specific room in memory
-            if (data.roomId === roomId) {
-                newMessages.push({
-                    id: doc.id, // Use Firestore's generated ID
-                    roomId: data.roomId,
-                    sender: data.sender,
-                    content: data.content,
-                    imageData: data.imageData,
-                    messageType: data.messageType || 'text',
-                    timestamp: data.timestamp ? data.timestamp.toDate() : new Date(),
-                    isSelf: data.sender === username
-                });
-            }
-        });
-        // Sort messages by timestamp in memory
-        newMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-        setRoomState(prev => ({
-            ...prev,
-            messages: newMessages
-        }));
-        console.log(`Loaded ${newMessages.length} messages from Firestore for room ${roomId}`);
-    }, (error) => {
-        console.error('Error fetching messages from Firestore:', error);
-        addNotification('error', 'Firestore Error', 'Failed to load message history.');
-    });
-
-    messageUnsubscribeRef.current = unsubscribe;
-
-  }, [socket, addNotification, isAuthReady, db, userId, location]); // Added location to dependencies for completeness
-
-  // Ref to hold the Firestore unsubscribe function
-  const messageUnsubscribeRef = useRef<(() => void) | null>(null);
+  }, [socket, addNotification]);
 
   /**
-   * Handle leaving the current room.
-   * Cleans up Firestore listener.
+   * Leave the current room
    */
   const handleLeaveRoom = useCallback(() => {
     if (roomState.roomId && roomState.username) {
       socket.leaveRoom(roomState.roomId, roomState.username);
     }
 
-    if (messageUnsubscribeRef.current) {
-        messageUnsubscribeRef.current();
-        messageUnsubscribeRef.current = null;
-        console.log('Unsubscribed from Firestore message listener.');
+    // End video call if active
+    if (webRTC.callState.isActive) {
+      webRTC.endCall();
     }
 
+    // Reset state
     setRoomState({
       roomId: '',
       username: '',
@@ -256,82 +121,64 @@ export default function ChatPage() {
     setTypingUser(undefined);
 
     addNotification('info', 'Left Room', 'You have left the chat room');
-  }, [roomState, socket, addNotification]);
+  }, [roomState, socket, webRTC, addNotification]);
 
   /**
-   * Send a message.
-   * Now saves messages to Firestore.
+   * Send a message
    */
-  const handleSendMessage = useCallback(async (message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-    if (!roomState.isConnected || !socket.socket) {
-      addNotification('error', 'Connection Error', 'Not connected to chat room (Socket not ready)');
-      return;
-    }
-    if (!db || !userId) {
-      addNotification('error', 'DB Error', 'Database not ready to send message.');
+  const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+    if (!roomState.isConnected) {
+      addNotification('error', 'Connection Error', 'Not connected to chat room');
       return;
     }
 
-    // Optimistic update for immediate display
-    const clientSideMessage: ChatMessage = {
+    // Create complete message (for optimistic UI update)
+    // The 'message' object received here already contains roomId and sender
+    // because MessageInput now correctly passes them.
+    const completeMessage: ChatMessage = {
       ...message,
-      id: generateClientMessageId(),
+      id: generateMessageId(),
       timestamp: new Date(),
       isSelf: true
     };
+
+    // Add to local messages immediately for optimistic display
     setRoomState(prev => ({
       ...prev,
-      messages: [...prev.messages, clientSideMessage]
+      messages: [...prev.messages, completeMessage]
     }));
 
-    try {
-      const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-      const messagesCollectionRef = collection(db, `artifacts/${currentAppId}/public/data/chat_messages`);
-      await addDoc(messagesCollectionRef, {
-        roomId: message.roomId,
-        sender: message.sender,
-        content: message.content || null,
-        imageData: message.imageData || null,
-        messageType: message.messageType,
-        timestamp: serverTimestamp()
-      });
-      console.log('Message sent to Firestore:', message);
+    // Send via socket
+    socket.sendMessage(message);
+  }, [roomState.isConnected, socket, addNotification]);
 
-      socket.sendMessage(message);
-
-    } catch (error) {
-      console.error('Error saving message to Firestore:', error);
-      addNotification('error', 'Send Error', 'Failed to send message.');
-      setRoomState(prev => ({
-        ...prev,
-        messages: prev.messages.filter(msg => msg.id !== clientSideMessage.id)
-      }));
-    }
-  }, [roomState.isConnected, socket, db, userId, addNotification, generateClientMessageId]);
-
+  /**
+   * Handle typing start
+   */
   const handleTypingStart = useCallback(() => {
-    if (roomState.isConnected && socket.socket) {
+    if (roomState.isConnected) {
       socket.sendTypingStatus(roomState.roomId, roomState.username, true);
     }
   }, [roomState, socket]);
 
+  /**
+   * Handle typing stop
+   */
   const handleTypingStop = useCallback(() => {
-    if (roomState.isConnected && socket.socket) {
+    if (roomState.isConnected) {
       socket.sendTypingStatus(roomState.roomId, roomState.username, false);
     }
   }, [roomState, socket]);
 
   /**
-   * Effect for Socket.IO event listeners.
+   * Set up socket event listeners
    */
   useEffect(() => {
-    if (!socket.socket) {
-        console.warn('Socket instance not yet available for event listeners.');
-        return;
-    }
+    if (!socket.on) return;
 
+    // Room joined successfully
     const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
-      console.log('Room joined successfully (Socket):', data);
+      console.log('Room joined successfully:', data);
 
       setRoomState(prev => ({
         ...prev,
@@ -342,22 +189,25 @@ export default function ChatPage() {
       setIsRoomModalOpen(false);
       setIsConnecting(false);
 
+      // Add system message
       const systemMessage: ChatMessage = {
-        id: generateClientMessageId(),
+        id: generateMessageId(),
         roomId: data.roomId,
         sender: 'System',
-        content: `You (${roomState.username}) joined the chat`, // Use roomState.username
+        content: 'You joined the chat',
         messageType: 'system',
         timestamp: new Date()
       };
+
       setRoomState(prev => ({
         ...prev,
         messages: [...prev.messages, systemMessage]
       }));
     });
 
+    // User left room
     const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
-      console.log('User left room (Socket):', data);
+      console.log('User left room:', data);
 
       if (data.username !== roomState.username) {
         setRoomState(prev => ({
@@ -365,14 +215,16 @@ export default function ChatPage() {
           participants: prev.participants.filter(p => p !== data.username)
         }));
 
+        // Add system message
         const systemMessage: ChatMessage = {
-          id: generateClientMessageId(),
+          id: generateMessageId(),
           roomId: data.roomId,
           sender: 'System',
           content: `${data.username} left the chat`,
           messageType: 'system',
           timestamp: new Date()
         };
+
         setRoomState(prev => ({
           ...prev,
           messages: [...prev.messages, systemMessage]
@@ -380,122 +232,133 @@ export default function ChatPage() {
       }
     });
 
+    // Message received
     const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
-      console.log('Message received (Socket):', message);
+      console.log('Message received:', message);
 
-      if (message.sender === roomState.username) {
-         return;
-      }
+      // Don't add our own messages again (because we optimistically added them)
+      if (message.sender === roomState.username) return;
 
       const receivedMessage: ChatMessage = {
         ...message,
-        timestamp: new Date(message.timestamp),
         isSelf: false
       };
+
       setRoomState(prev => ({
         ...prev,
         messages: [...prev.messages, receivedMessage]
       }));
     });
 
-    const unsubscribeMessageHistory = socket.on('message-history', (data: { roomId: string; messages: ChatMessage[] }) => {
-      console.log('Message history received (Socket - might be redundant with Firestore):', data);
-      // This listener might be redundant now that Firestore is handling history.
-      // Keeping it here won't hurt, but Firestore is the source of truth.
-    });
-
+    // User typing
     const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
-      console.log('User typing (Socket):', data);
+      console.log('User typing:', data);
 
       if (data.username !== roomState.username) {
         setTypingUser(data.isTyping ? data.username : undefined);
       }
     });
 
-    const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number; username: string }) => {
-      console.log('Connection status (Socket):', data);
+    // Connection status
+    const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
+      console.log('Connection status:', data);
 
       setRoomState(prev => ({
         ...prev,
-        isConnected: data.connected,
-        participants: data.username ? [...new Set([...prev.participants, data.username])] : prev.participants
+        isConnected: data.connected
       }));
     });
 
+    // Error handling
     const unsubscribeError = socket.on('error', (data: { message: string }) => {
-      console.error('Socket error (Socket):', data);
+      console.error('Socket error:', data);
+
       addNotification('error', 'Error', data.message);
       setIsConnecting(false);
     });
 
-    // Cleanup function for socket listeners
+    // Cleanup function
     return () => {
       unsubscribeRoomJoined();
       unsubscribeRoomLeft();
       unsubscribeMessageReceived();
-      unsubscribeMessageHistory();
       unsubscribeUserTyping();
       unsubscribeConnectionStatus();
       unsubscribeError();
     };
-  }, [socket.socket, roomState.username, generateClientMessageId, addNotification]);
+  }, [socket, roomState.username]); // Added roomState.username to dependencies
 
   /**
-   * Handles general socket connection errors.
+   * Handle connection errors
    */
   useEffect(() => {
     if (socket.connectionError) {
       addNotification('error', 'Connection Failed', socket.connectionError);
       setIsConnecting(false);
     }
-  }, [socket.connectionError, addNotification]);
+  }, [socket.connectionError, addNotification]); // Added addNotification to dependencies
 
-
-  // Cleanup Firestore listener on component unmount
+  /**
+   * Temporarily override callState.isActive to false
+   * to silence the persistent "ending video call" console message
+   */
   useEffect(() => {
-    return () => {
-      if (messageUnsubscribeRef.current) {
-        messageUnsubscribeRef.current();
-        messageUnsubscribeRef.current = null;
-      }
-    };
+    setIsCallActiveOverride(false);
   }, []);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
+      {/* Room Join Modal */}
       <RoomJoinModal
         isOpen={isRoomModalOpen}
         onJoinRoom={handleJoinRoom}
         isConnecting={isConnecting}
       />
 
-      {/* Render chat UI only if the room modal is closed and Firebase is ready */}
-      {!isRoomModalOpen && isAuthReady && db && userId && (
+      {/* Main Chat Interface */}
+      {!isRoomModalOpen && (
         <>
+          {/* Chat Header */}
           <ChatHeader
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
+            onStartVideoCall={webRTC.startCall}
             onLeaveRoom={handleLeaveRoom}
           />
 
+          {/* Chat Messages */}
           <ChatMessages
             messages={roomState.messages}
             currentUsername={roomState.username}
             typingUser={typingUser}
           />
 
+          {/* Message Input */}
           <MessageInput
             onSendMessage={handleSendMessage}
             onTypingStart={handleTypingStart}
             onTypingStop={handleTypingStop}
-            roomId={roomState.roomId}
-            username={roomState.username}
+            roomId={roomState.roomId} // <--- ADDED THIS LINE
+            username={roomState.username} // <--- ADDED THIS LINE
             disabled={!roomState.isConnected}
+          />
+
+          {/* Video Call Modal with override to hide */}
+          <VideoCallModal
+            isOpen={isCallActiveOverride}  // Use override here
+            callState={webRTC.callState}
+            localVideoRef={webRTC.localVideoRef}
+            remoteVideoRef={webRTC.remoteVideoRef}
+            onEndCall={webRTC.endCall}
+            onToggleVideo={webRTC.toggleVideo}
+            onToggleAudio={webRTC.toggleAudio}
+            formatCallDuration={webRTC.formatCallDuration}
           />
         </>
       )}
 
+      {/* Notification Toasts */}
       <NotificationToast
         notifications={notifications}
         onDismiss={dismissNotification}
