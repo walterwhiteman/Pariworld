@@ -6,13 +6,14 @@ interface ChatMessagesProps {
   messages: ChatMessage[];
   currentUsername: string;
   typingUser?: string;
+  onImageClick: (imageUrl: string) => void; // <-- ADDED THIS PROP
 }
 
 /**
  * Chat messages container component that displays all messages in a scrollable area
  * Handles message rendering, auto-scrolling, and typing indicators
  */
-export function ChatMessages({ messages, currentUsername, typingUser }: ChatMessagesProps) {
+export function ChatMessages({ messages, currentUsername, typingUser, onImageClick }: ChatMessagesProps) { // <-- ADDED onImageClick to destructuring
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -29,9 +30,9 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
    * Format timestamp for display
    */
   const formatTime = (timestamp: Date): string => {
-    return new Date(timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
     });
   };
 
@@ -67,12 +68,12 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
 
     // Regular messages
     return (
-      <div 
-        key={message.id} 
+      <div
+        key={message.id}
         className={`flex items-start space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : ''}`}
       >
         {/* Avatar */}
-        <div 
+        <div
           className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
             isSelf ? 'bg-blue-600' : 'bg-gray-300'
           }`}
@@ -101,11 +102,9 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
                 <img
                   src={message.imageData}
                   alt="Shared image"
-                  className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => {
-                    // Open image in modal (could be implemented later)
-                    window.open(message.imageData, '_blank');
-                  }}
+                  // ADDED/MODIFIED THESE CLASSES FOR THUMBNAIL VIEW
+                  className="w-40 h-40 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => onImageClick(message.imageData!)} // <-- MODIFIED onClick to use onImageClick prop
                 />
               </div>
             )}
@@ -149,12 +148,12 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
         <div className="rounded-2xl rounded-tl-md bg-white border border-gray-200 px-4 py-3 shadow-sm">
           <div className="flex space-x-1">
             <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-            <div 
-              className="h-2 w-2 animate-bounce rounded-full bg-gray-400" 
+            <div
+              className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
               style={{ animationDelay: '0.1s' }}
             ></div>
-            <div 
-              className="h-2 w-2 animate-bounce rounded-full bg-gray-400" 
+            <div
+              className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
               style={{ animationDelay: '0.2s' }}
             ></div>
           </div>
@@ -165,7 +164,7 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
-      <div 
+      <div
         ref={containerRef}
         className="flex-1 space-y-4 overflow-y-auto p-4"
         style={{ scrollBehavior: 'smooth' }}
