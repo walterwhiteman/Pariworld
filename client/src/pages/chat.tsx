@@ -7,7 +7,7 @@ import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
-import { ImageViewerModal } from '@/components/chat/ImageViewerModal'; // <-- ADDED THIS IMPORT
+import { ImageViewerModal } from '@/components/chat/ImageViewerModal';
 import { useSocket } from '@/hooks/useSocket';
 import { useWebRTC } from '@/hooks/useWebRTC';
 
@@ -33,7 +33,7 @@ export default function ChatPage() {
   const [typingUser, setTypingUser] = useState<string | undefined>();
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
 
-  // Image Viewer Modal state <-- ADDED THESE LINES
+  // Image Viewer Modal state
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
 
@@ -72,7 +72,7 @@ export default function ChatPage() {
   }, []);
 
   /**
-   * Handle image click to open in viewer modal <-- ADDED THIS FUNCTION
+   * Handle image click to open in viewer modal
    */
   const handleImageClick = useCallback((imageUrl: string) => {
     setCurrentViewingImage(imageUrl);
@@ -80,7 +80,7 @@ export default function ChatPage() {
   }, []);
 
   /**
-   * Handle closing the image viewer modal <-- ADDED THIS FUNCTION
+   * Handle closing the image viewer modal
    */
   const handleCloseImageViewer = useCallback(() => {
     setIsImageViewerOpen(false);
@@ -360,7 +360,7 @@ export default function ChatPage() {
         <>
           {/* Chat Header - Make it fixed at the top */}
           <ChatHeader
-            className="flex-none" // <-- ADDED THIS LINE
+            className="flex-none"
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
@@ -374,12 +374,12 @@ export default function ChatPage() {
             messages={roomState.messages}
             currentUsername={roomState.username}
             typingUser={typingUser}
-            onImageClick={handleImageClick} // <-- ADDED THIS PROP
+            onImageClick={handleImageClick}
           />
 
           {/* Message Input - Make it fixed at the bottom */}
           <MessageInput
-            className="flex-none" // <-- ADDED THIS LINE
+            className="flex-none"
             onSendMessage={handleSendMessage}
             onTypingStart={handleTypingStart}
             onTypingStop={handleTypingStop}
@@ -390,9 +390,31 @@ export default function ChatPage() {
 
           {/* Video Call Modal with override to hide */}
           <VideoCallModal
-            isOpen={isCallActiveOverride} // Use the override for now
+            isOpen={webRTC.callState.isActive && !isCallActiveOverride} // Use webRTC.callState.isActive directly for actual call state
             callState={webRTC.callState}
             localVideoRef={webRTC.localVideoRef}
             remoteVideoRef={webRTC.remoteVideoRef}
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
+            onToggleAudio={webRTC.toggleAudio}
+            onToggleSpeaker={webRTC.toggleSpeaker} // <-- Removed duplicate line
+            formatCallDuration={webRTC.formatCallDuration}
+          />
+        </>
+      )}
+
+      {/* Notification Toasts */}
+      <NotificationToast
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
+
+      {/* Image Viewer Modal */}
+      <ImageViewerModal
+        isOpen={isImageViewerOpen}
+        imageUrl={currentViewingImage}
+        onClose={handleCloseImageViewer}
+      />
+    </div>
+  );
+}
