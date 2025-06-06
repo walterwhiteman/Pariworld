@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'; // Note: Input is imported but no
 import { Textarea } from '@/components/ui/textarea';
 import { Image, Send, X } from 'lucide-react';
 import { ChatMessage } from '@/types/chat';
+import { resizeImageAndConvertToBase64 } from '@/lib/utils'; // <-- NEW IMPORT
 
 interface MessageInputProps {
   onSendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
@@ -12,7 +13,7 @@ interface MessageInputProps {
   roomId: string;
   username: string;
   disabled?: boolean;
-  className?: string; // <-- ADDED THIS LINE
+  className?: string;
 }
 
 /**
@@ -26,12 +27,12 @@ export function MessageInput({
   roomId,
   username,
   disabled = false,
-  className // <-- ADDED THIS LINE
+  className
 }: MessageInputProps) {
   const [messageText, setMessageText] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null); // This will now hold the resized Base64
+  const [isUploading, setIsUploading] = useState(false); // Indicates image processing/upload preparation
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,38 +80,38 @@ export function MessageInput({
   };
 
   /**
-   * Handle image file selection
+   * Handle image file selection, resize, and create preview
    */
   const handleImageSelect = async (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file');
+      alert('Please select a valid image file (e.g., JPEG, PNG, GIF).');
       return;
     }
 
-    // Check file size (limit to 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image size must be less than 5MB');
+    // Check original file size (a reasonable limit before even processing)
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit for original file
+      alert('Image size must be less than 5MB before processing. Please select a smaller image.');
       return;
     }
 
     setIsUploading(true);
-    setSelectedImage(file);
+    setSelectedImage(file); // Store the original file object
 
     try {
-      // Create preview
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          setImagePreview(e.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      // Resize and convert the image to Base64 for preview and sending
+      const resizedBase64Data = await resizeImageAndConvertToBase64(file, 800, 600, 0.8); // Max 800px width, 600px height, 80% quality
+
+      if (resizedBase64Data) {
+        setImagePreview(resizedBase64Data); // Set the resized Base64 as the preview
+      } else {
+        throw new Error('Image processing failed.');
+      }
     } catch (error) {
       console.error('Error processing image:', error);
       alert('Error processing image. Please try again.');
       clearImageSelection();
     } finally {
-      setIsUploading(false);
+      setIsUploading(false); // Processing finished
     }
   };
 
@@ -121,75 +122,59 @@ export function MessageInput({
     setSelectedImage(null);
     setImagePreview(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = ''; // Reset the file input element
     }
   };
 
-  /**
-   * Convert image to Base64 for transmission
-   */
-  const convertImageToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (reader.result) {
-          resolve(reader.result as string);
-        } else {
-          reject(new Error('Failed to read file'));
-        }
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  };
+  // Removed convertImageToBase64 as resizeImageAndConvertToBase64 handles it
 
   /**
    * Send message (text or image)
    */
   const handleSendMessage = async () => {
     const hasText = messageText.trim();
-    const hasImage = selectedImage;
+    const hasImage = selectedImage && imagePreview; // Check if an image is selected AND its preview (resized data) exists
 
-    if (!hasText && !hasImage) return;
+    if (!hasText && !hasImage) return; // Don't send empty messages
 
     try {
-      // Stop typing indicator
+      // Stop typing indicator if active
       if (isTypingRef.current) {
         isTypingRef.current = false;
         onTypingStop();
       }
 
-      // Send text message
-      if (hasText && !hasImage) {
-        const message: Omit<ChatMessage, 'id' | 'timestamp'> = {
+      // Prepare message data
+      let message: Omit<ChatMessage, 'id' | 'timestamp'>;
+
+      if (hasImage) {
+        // If an image is selected, send it. Optionally include text content.
+        message = {
+          roomId,
+          sender: username,
+          content: hasText ? messageText.trim() : undefined, // Include text if present
+          imageData: imagePreview!, // Use the already processed Base64 string
+          messageType: 'image'
+        };
+      } else if (hasText) {
+        // If only text is present
+        message = {
           roomId,
           sender: username,
           content: messageText.trim(),
           messageType: 'text'
         };
-        
-        onSendMessage(message);
-        setMessageText('');
+      } else {
+        // Should not happen due to initial check, but for safety
+        return;
       }
-      
-      // Send image message
-      if (hasImage) {
-        setIsUploading(true);
-        
-        const base64Data = await convertImageToBase64(hasImage);
-        
-        const message: Omit<ChatMessage, 'id' | 'timestamp'> = {
-          roomId,
-          sender: username,
-          content: hasText ? messageText.trim() : undefined,
-          imageData: base64Data,
-          messageType: 'image'
-        };
-        
-        onSendMessage(message);
-        setMessageText('');
-        clearImageSelection();
-      }
+
+      // Send the message via prop
+      onSendMessage(message);
+
+      // Reset input fields after sending
+      setMessageText('');
+      clearImageSelection();
 
       // Reset textarea height
       if (textareaRef.current) {
@@ -199,9 +184,8 @@ export function MessageInput({
     } catch (error) {
       console.error('Error sending message:', error);
       alert('Failed to send message. Please try again.');
-    } finally {
-      setIsUploading(false);
     }
+    // isUploading is controlled by handleImageSelect, not by sending
   };
 
   /**
@@ -215,13 +199,15 @@ export function MessageInput({
   };
 
   /**
-   * Handle file input change
+   * Handle file input change event
    */
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       handleImageSelect(file);
     }
+    // Clear the input value so the same file can be selected again if needed
+    e.target.value = '';
   };
 
   /**
@@ -236,7 +222,7 @@ export function MessageInput({
   };
 
   /**
-   * Cleanup typing timeout on unmount
+   * Cleanup typing timeout on component unmount
    */
   useEffect(() => {
     return () => {
@@ -248,14 +234,14 @@ export function MessageInput({
 
   return (
     // Apply the className to the root footer element
-    <footer className={`border-t border-gray-200 bg-white p-4 ${className}`}> {/* <-- MODIFIED THIS LINE */}
+    <footer className={`border-t border-gray-200 bg-white p-4 ${className}`}>
       {/* Image Preview */}
       {imagePreview && (
         <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <img
-                src={imagePreview}
+                src={imagePreview} // This is now the resized Base64
                 alt="Image preview"
                 className="h-12 w-12 rounded-lg object-cover"
               />
