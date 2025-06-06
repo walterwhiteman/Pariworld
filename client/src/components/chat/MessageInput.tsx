@@ -1,10 +1,12 @@
+// src/components/chat/MessageInput.tsx
+
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input'; // Note: Input is imported but not used in the provided code.
 import { Textarea } from '@/components/ui/textarea';
 import { Image, Send, X } from 'lucide-react';
 import { ChatMessage } from '@/types/chat';
-import { resizeImageAndConvertToBase64 } from '@/lib/utils'; // <-- NEW IMPORT
+import { resizeImageAndConvertToBase64 } from '@/lib/utils'; // Import the utility
 
 interface MessageInputProps {
   onSendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
@@ -90,7 +92,7 @@ export function MessageInput({
 
     // Check original file size (a reasonable limit before even processing)
     if (file.size > 5 * 1024 * 1024) { // 5MB limit for original file
-      alert('Image size must be less than 5MB before processing. Please select a smaller image.');
+      alert('Original image size must be less than 5MB before processing. Please select a smaller image.');
       return;
     }
 
@@ -98,20 +100,25 @@ export function MessageInput({
     setSelectedImage(file); // Store the original file object
 
     try {
+      console.log('Starting image processing...');
       // Resize and convert the image to Base64 for preview and sending
       const resizedBase64Data = await resizeImageAndConvertToBase64(file, 800, 600, 0.8); // Max 800px width, 600px height, 80% quality
 
       if (resizedBase64Data) {
         setImagePreview(resizedBase64Data); // Set the resized Base64 as the preview
+        console.log('Image resized successfully!');
+        console.log('Resized Base64 data length:', resizedBase64Data.length, 'bytes');
+        console.log('Resized Base64 data starts with:', resizedBase64Data.substring(0, 50) + '...'); // Log first 50 chars
       } else {
-        throw new Error('Image processing failed.');
+        throw new Error('Image processing failed: resized data is null.');
       }
     } catch (error) {
-      console.error('Error processing image:', error);
+      console.error('Error processing image in handleImageSelect:', error);
       alert('Error processing image. Please try again.');
       clearImageSelection();
     } finally {
       setIsUploading(false); // Processing finished
+      console.log('Image processing finished. isUploading set to false.');
     }
   };
 
@@ -149,6 +156,10 @@ export function MessageInput({
 
       if (hasImage) {
         // If an image is selected, send it. Optionally include text content.
+        console.log('Preparing to send image message...');
+        console.log('Image data length from imagePreview:', imagePreview!.length, 'bytes');
+        console.log('Image data starts with (from imagePreview):', imagePreview!.substring(0, 50) + '...');
+
         message = {
           roomId,
           sender: username,
@@ -171,6 +182,7 @@ export function MessageInput({
 
       // Send the message via prop
       onSendMessage(message);
+      console.log('onSendMessage called with message:', message);
 
       // Reset input fields after sending
       setMessageText('');
@@ -182,7 +194,7 @@ export function MessageInput({
       }
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error sending message in handleSendMessage:', error);
       alert('Failed to send message. Please try again.');
     }
     // isUploading is controlled by handleImageSelect, not by sending
