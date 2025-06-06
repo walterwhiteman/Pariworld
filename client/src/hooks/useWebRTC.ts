@@ -1,43 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-// Import VideoCallState and WebRTCSignal from types/chat
 import { VideoCallState, WebRTCSignal } from '@/types/chat';
-// Import useSocket hook itself, not just its type
-import { useSocket } from '../hooks/useSocket'; // <--- UPDATED IMPORT
 
 /**
  * Custom hook for WebRTC video calling functionality
  * Implements peer-to-peer video communication for the chat application
  */
-export function useWebRTC(
-  // REMOVED: socket: SocketContextType is no longer a parameter
-  roomId: string,
-  username: string,
-  localVideoRef: React.RefObject<HTMLVideoElement>,
-  remoteVideoRef: React.RefObject<HTMLVideoElement>
-) {
-  // NEW: Get socket instance directly inside the hook
-  const socket = useSocket(); // <--- Get socket here
-
+export function useWebRTC(socket: any, roomId: string, username: string) {
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
-    isInitiator: false,
-    isRinging: false,
-    isAnswered: false,
     isLocalVideoEnabled: true,
     isLocalAudioEnabled: true,
     localStream: null,
     remoteStream: null,
-    remoteUser: null,
-    hasLocalStream: false,
-    hasRemoteStream: false,
-    callDuration: 0,
-    error: null,
+    callDuration: 0
   });
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const callStartTimeRef = useRef<number | null>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // WebRTC configuration with STUN servers
   const rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -45,36 +29,41 @@ export function useWebRTC(
     ]
   };
 
+  /**
+   * Initialize WebRTC peer connection
+   */
   const initializePeerConnection = useCallback(() => {
     try {
       const peerConnection = new RTCPeerConnection(rtcConfig);
       peerConnectionRef.current = peerConnection;
 
+      // Handle ICE candidates
       peerConnection.onicecandidate = (event) => {
-        // Use socket?.socket?.emit here as useSocket returns the context object
-        if (event.candidate && socket?.socket?.emit) {
-          socket.socket.emit('webrtc-signal', {
+        if (event.candidate && socket?.emit) {
+          socket.emit('webrtc-signal', {
             type: 'ice-candidate',
             data: event.candidate,
             roomId,
-            sender: username,
+            sender: username
           });
         }
       };
 
+      // Handle remote stream
       peerConnection.ontrack = (event) => {
-        console.log('Received remote stream:', event.streams[0]);
+        console.log('Received remote stream');
         const [remoteStream] = event.streams;
-        setCallState(prev => ({ ...prev, remoteStream, hasRemoteStream: true }));
-
+        setCallState(prev => ({ ...prev, remoteStream }));
+        
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
         }
       };
 
+      // Handle connection state changes
       peerConnection.onconnectionstatechange = () => {
-        console.log('Peer connection state:', peerConnection.connectionState);
-        if (peerConnection.connectionState === 'disconnected' ||
+        console.log('Connection state:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'disconnected' || 
             peerConnection.connectionState === 'failed') {
           endCall();
         }
@@ -83,36 +72,40 @@ export function useWebRTC(
       return peerConnection;
     } catch (error) {
       console.error('Error initializing peer connection:', error);
-      setCallState(prev => ({ ...prev, error: 'Failed to initialize peer connection' }));
       return null;
     }
-  }, [socket, roomId, username, endCall, remoteVideoRef]);
+  }, [socket, roomId, username]);
 
+  /**
+   * Get user media (camera and microphone)
+   */
   const getUserMedia = useCallback(async (): Promise<MediaStream | null> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true
       });
-
-      setCallState(prev => ({ ...prev, localStream: stream, hasLocalStream: true }));
-
+      
+      setCallState(prev => ({ ...prev, localStream: stream }));
+      
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
-
+      
       return stream;
     } catch (error) {
       console.error('Error accessing media devices:', error);
-      setCallState(prev => ({ ...prev, error: 'Failed to access camera/microphone. Please ensure permissions are granted.' }));
       return null;
     }
-  }, [localVideoRef]);
+  }, []);
 
+  /**
+   * Start a video call
+   */
   const startCall = useCallback(async () => {
     try {
       console.log('Starting video call...');
-
+      
       const localStream = await getUserMedia();
       if (!localStream) {
         throw new Error('Failed to access camera/microphone');
@@ -123,16 +116,17 @@ export function useWebRTC(
         throw new Error('Failed to initialize peer connection');
       }
 
+      // Add local stream to peer connection
       localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
       });
 
+      // Create and send offer
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
 
-      // Use socket?.socket?.emit here
-      if (socket?.socket?.emit) {
-        socket.socket.emit('webrtc-signal', {
+      if (socket?.emit) {
+        socket.emit('webrtc-signal', {
           type: 'offer',
           data: offer,
           roomId,
@@ -140,31 +134,31 @@ export function useWebRTC(
         });
       }
 
+      // Update call state
       setCallState(prev => ({
         ...prev,
         isActive: true,
-        isInitiator: true,
-        localStream,
-        hasLocalStream: true,
-        callDuration: 0,
-        error: null,
+        localStream
       }));
 
+      // Start call timer
       callStartTimeRef.current = Date.now();
       startCallTimer();
 
-      console.log('Video call started successfully.');
+      console.log('Video call started');
     } catch (error) {
       console.error('Error starting call:', error);
-      setCallState(prev => ({ ...prev, error: (error as Error).message || 'Failed to start call' }));
       endCall();
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, endCall, startCallTimer]);
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username]);
 
+  /**
+   * Answer an incoming call
+   */
   const answerCall = useCallback(async (offer: RTCSessionDescriptionInit) => {
     try {
       console.log('Answering incoming call...');
-
+      
       const localStream = await getUserMedia();
       if (!localStream) {
         throw new Error('Failed to access camera/microphone');
@@ -175,17 +169,18 @@ export function useWebRTC(
         throw new Error('Failed to initialize peer connection');
       }
 
+      // Add local stream to peer connection
       localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
       });
 
+      // Set remote description and create answer
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
-      // Use socket?.socket?.emit here
-      if (socket?.socket?.emit) {
-        socket.socket.emit('webrtc-signal', {
+      if (socket?.emit) {
+        socket.emit('webrtc-signal', {
           type: 'answer',
           data: answer,
           roomId,
@@ -193,47 +188,48 @@ export function useWebRTC(
         });
       }
 
+      // Update call state
       setCallState(prev => ({
         ...prev,
         isActive: true,
-        isAnswered: true,
-        localStream,
-        hasLocalStream: true,
-        callDuration: 0,
-        error: null,
+        localStream
       }));
 
+      // Start call timer
       callStartTimeRef.current = Date.now();
       startCallTimer();
 
-      console.log('Call answered successfully.');
+      console.log('Call answered');
     } catch (error) {
       console.error('Error answering call:', error);
-      setCallState(prev => ({ ...prev, error: (error as Error).message || 'Failed to answer call' }));
       endCall();
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, endCall, startCallTimer]);
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username]);
 
+  /**
+   * End the current call
+   */
   const endCall = useCallback(() => {
     console.log('Ending video call...');
 
+    // Stop call timer
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
 
+    // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
 
+    // Stop local stream
     if (callState.localStream) {
       callState.localStream.getTracks().forEach(track => track.stop());
     }
-    if (callState.remoteStream) {
-        callState.remoteStream.getTracks().forEach(track => track.stop());
-    }
 
+    // Clear video elements
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
     }
@@ -241,9 +237,9 @@ export function useWebRTC(
       remoteVideoRef.current.srcObject = null;
     }
 
-    // Use socket?.socket?.emit here
-    if (socket?.socket?.emit && callState.isActive) {
-      socket.socket.emit('webrtc-signal', {
+    // Notify other peer
+    if (socket?.emit && callState.isActive) {
+      socket.emit('webrtc-signal', {
         type: 'call-end',
         data: {},
         roomId,
@@ -251,25 +247,22 @@ export function useWebRTC(
       });
     }
 
+    // Reset call state
     setCallState({
       isActive: false,
-      isInitiator: false,
-      isRinging: false,
-      isAnswered: false,
       isLocalVideoEnabled: true,
       isLocalAudioEnabled: true,
       localStream: null,
       remoteStream: null,
-      remoteUser: null,
-      hasLocalStream: false,
-      hasRemoteStream: false,
-      callDuration: 0,
-      error: null,
+      callDuration: 0
     });
 
     callStartTimeRef.current = null;
-  }, [callState.localStream, callState.remoteStream, callState.isActive, socket, roomId, username, localVideoRef, remoteVideoRef]);
+  }, [callState.localStream, callState.isActive, socket, roomId, username]);
 
+  /**
+   * Toggle local video
+   */
   const toggleVideo = useCallback(() => {
     if (callState.localStream) {
       const videoTrack = callState.localStream.getVideoTracks()[0];
@@ -283,6 +276,9 @@ export function useWebRTC(
     }
   }, [callState.localStream]);
 
+  /**
+   * Toggle local audio
+   */
   const toggleAudio = useCallback(() => {
     if (callState.localStream) {
       const audioTrack = callState.localStream.getAudioTracks()[0];
@@ -296,10 +292,10 @@ export function useWebRTC(
     }
   }, [callState.localStream]);
 
+  /**
+   * Start call duration timer
+   */
   const startCallTimer = useCallback(() => {
-    if (callTimerRef.current) {
-      clearInterval(callTimerRef.current);
-    }
     callTimerRef.current = setInterval(() => {
       if (callStartTimeRef.current) {
         const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
@@ -308,69 +304,62 @@ export function useWebRTC(
     }, 1000);
   }, []);
 
+  /**
+   * Format call duration for display
+   */
   const formatCallDuration = useCallback((seconds: number): string => {
-    if (seconds < 0 || isNaN(seconds)) return '00:00';
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, []);
 
+  /**
+   * Handle WebRTC signaling messages
+   */
   useEffect(() => {
-    // Check if socket.socket is available before attaching listener
-    if (!socket?.socket?.on) return; // <--- CRITICAL CHECK: Ensure actual socket instance is available
+    if (!socket?.on) return;
 
     const handleWebRTCSignal = async (signal: WebRTCSignal) => {
       if (signal.roomId !== roomId || signal.sender === username) return;
 
-      const peerConnection = peerConnectionRef.current;
-      if (!peerConnection) {
-          console.warn('WebRTC signal received but peerConnection is not initialized.');
-          setCallState(prev => ({ ...prev, error: 'WebRTC connection not ready for signaling.' }));
-          return;
-      }
-
       try {
         switch (signal.type) {
           case 'offer':
-            console.log('Received offer from:', signal.sender);
-            setCallState(prev => ({ ...prev, remoteUser: signal.sender, isRinging: true }));
             await answerCall(signal.data);
             break;
-
+            
           case 'answer':
-            console.log('Received answer from:', signal.sender);
-            if (peerConnection) {
-              await peerConnection.setRemoteDescription(
+            if (peerConnectionRef.current) {
+              await peerConnectionRef.current.setRemoteDescription(
                 new RTCSessionDescription(signal.data)
               );
-              setCallState(prev => ({ ...prev, isAnswered: true, isRinging: false }));
             }
             break;
-
+            
           case 'ice-candidate':
-            console.log('Received ICE candidate from:', signal.sender);
-            if (peerConnection) {
-              await peerConnection.addIceCandidate(
+            if (peerConnectionRef.current) {
+              await peerConnectionRef.current.addIceCandidate(
                 new RTCIceCandidate(signal.data)
               );
             }
             break;
-
+            
           case 'call-end':
-            console.log('Received call-end signal from:', signal.sender);
             endCall();
             break;
         }
       } catch (error) {
         console.error('Error handling WebRTC signal:', error);
-        setCallState(prev => ({ ...prev, error: (error as Error).message || 'Error processing WebRTC signal' }));
       }
     };
 
-    const cleanup = socket.socket.on('webrtc-signal', handleWebRTCSignal); // <--- Use socket.socket.on
+    const cleanup = socket.on('webrtc-signal', handleWebRTCSignal);
     return cleanup;
-  }, [socket.socket, roomId, username, answerCall, endCall]); // Add socket.socket to dependencies
+  }, [socket, roomId, username, answerCall, endCall]);
 
+  /**
+   * Cleanup on unmount
+   */
   useEffect(() => {
     return () => {
       endCall();
