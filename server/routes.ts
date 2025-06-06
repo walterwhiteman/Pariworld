@@ -1,10 +1,8 @@
-// route.ts (Server-side)
-
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from 'socket.io';
 import { storage } from "./storage"; // Make sure storage.ts is updated as provided previously
-import { RoomParticipant } from "@shared/schema"; // Ensure this path is correct
+import { RoomParticipant } from "@shared/schema";
 
 // NOTE: This interface is for backend context.
 // It should align with the ChatMessage interface in storage.ts and your Drizzle schema.
@@ -12,8 +10,8 @@ interface ChatMessage {
     id: string;
     roomId: string;
     sender: string;
-    content: string | null;
-    imageData: string | null;
+    content: string | null; // Changed to string | null for consistency
+    imageData: string | null; // Changed to string | null for consistency
     messageType: 'text' | 'image' | 'system';
     timestamp: Date;
 }
@@ -36,9 +34,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Socket.IO server attached to the HTTP server
     const io = new SocketIOServer(httpServer, {
         path: '/ws',
-        // IMPORTANT: Increase the buffer size to handle larger image data
-        // Default is 1MB, 50MB is a generous but safe starting point for resized images.
-        maxHttpBufferSize: 50 * 1024 * 1024, // 50 MB
         cors: {
             origin: "https://pariworld.onrender.com",
             methods: ["GET", "POST"],
@@ -75,7 +70,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
             const { roomId } = req.params;
             const participants = await storage.getRoomParticipants(roomId);
-            const activeParticipants = participants.filter(p => p.isActive); // This line uses 'isActive' from storage.getRoomParticipants' return type, ensure consistency
+            const activeParticipants = participants.filter(p => p.isActive);
 
             // Using `io` directly here. Ensure this route is hit after io is initialized.
             const roomSockets = io.sockets.adapter.rooms.get(roomId);
@@ -131,7 +126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     socket.emit('message-history', {
                         roomId,
                         messages: previousMessages.map(msg => ({
-                            id: String(msg.id), // Ensure ID is string for frontend
+                            id: String(msg.id),
                             roomId: msg.roomId,
                             sender: msg.sender,
                             content: msg.content,
@@ -211,8 +206,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const messageToSave = {
                 roomId,
                 sender: username,
-                content: messageData.content || null,
-                imageData: messageData.imageData || null,
+                content: messageData.content || null, // Ensure null if undefined
+                imageData: messageData.imageData || null, // Ensure null if undefined
                 messageType: messageData.messageType || 'text',
             };
 
