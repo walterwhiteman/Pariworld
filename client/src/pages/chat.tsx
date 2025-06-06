@@ -13,30 +13,30 @@ import { useWebRTC } from '@/hooks/useWebRTC';
 // Ensure these types are correctly defined in your '@/types/chat' file
 // Example:
 // export interface ChatMessage {
-//   id: string;
-//   roomId: string;
-//   sender: string;
-//   content: string | null; // Changed to string | null
-//   imageData: string | null; // Changed to string | null
-//   messageType: 'text' | 'image' | 'system';
-//   timestamp: Date;
-//   isSelf?: boolean; // Client-side only property
+//    id: string;
+//    roomId: string;
+//    sender: string;
+//    content: string | null; // Changed to string | null
+//    imageData: string | null; // Changed to string | null
+//    messageType: 'text' | 'image' | 'system';
+//    timestamp: Date;
+//    isSelf?: boolean; // Client-side only property
 // }
 //
 // export interface RoomState {
-//   roomId: string;
-//   username: string;
-//   isConnected: boolean;
-//   participants: string[];
-//   messages: ChatMessage[];
+//    roomId: string;
+//    username: string;
+//    isConnected: boolean;
+//    participants: string[];
+//    messages: ChatMessage[];
 // }
 //
 // export interface NotificationData {
-//   id: string;
-//   type: 'success' | 'error' | 'info' | 'warning';
-//   title: string;
-//   message: string;
-//   duration?: number;
+//    id: string;
+//    type: 'success' | 'error' | 'info' | 'warning';
+//    title: string;
+//    message: string;
+//    duration?: number;
 // }
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
@@ -370,8 +370,9 @@ export default function ChatPage() {
       {/* Main Chat Interface */}
       {!isRoomModalOpen && (
         <>
-          {/* Chat Header */}
+          {/* Chat Header - Make it fixed at the top */}
           <ChatHeader
+            className="flex-none" // <-- ADDED THIS LINE
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
@@ -379,15 +380,17 @@ export default function ChatPage() {
             onLeaveRoom={handleLeaveRoom}
           />
 
-          {/* Chat Messages */}
+          {/* Chat Messages - This component's internal 'main' tag already has flex-1 and overflow-hidden,
+                           and its inner div has overflow-y-auto, so messages will scroll here. */}
           <ChatMessages
             messages={roomState.messages}
             currentUsername={roomState.username}
             typingUser={typingUser}
           />
 
-          {/* Message Input */}
+          {/* Message Input - Make it fixed at the bottom */}
           <MessageInput
+            className="flex-none" // <-- ADDED THIS LINE
             onSendMessage={handleSendMessage}
             onTypingStart={handleTypingStart}
             onTypingStop={handleTypingStop}
@@ -405,6 +408,7 @@ export default function ChatPage() {
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
             onToggleAudio={webRTC.toggleAudio}
+            onToggleSpeaker={webRTC.toggleSpeaker}
             onToggleSpeaker={webRTC.toggleSpeaker}
             formatCallDuration={webRTC.formatCallDuration}
           />
