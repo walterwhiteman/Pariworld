@@ -9,7 +9,36 @@ import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { useSocket } from '@/hooks/useSocket';
 import { useWebRTC } from '@/hooks/useWebRTC';
-import { ChatMessage, NotificationData, RoomState } from '@/types/chat'; // Ensure ChatMessage is correctly typed
+
+// Ensure these types are correctly defined in your '@/types/chat' file
+// Example:
+// export interface ChatMessage {
+//   id: string;
+//   roomId: string;
+//   sender: string;
+//   content: string | null; // Changed to string | null
+//   imageData: string | null; // Changed to string | null
+//   messageType: 'text' | 'image' | 'system';
+//   timestamp: Date;
+//   isSelf?: boolean; // Client-side only property
+// }
+//
+// export interface RoomState {
+//   roomId: string;
+//   username: string;
+//   isConnected: boolean;
+//   participants: string[];
+//   messages: ChatMessage[];
+// }
+//
+// export interface NotificationData {
+//   id: string;
+//   type: 'success' | 'error' | 'info' | 'warning';
+//   title: string;
+//   message: string;
+//   duration?: number;
+// }
+import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
  * Main chat page component that orchestrates the entire chat application
@@ -65,12 +94,10 @@ export default function ChatPage() {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
-  /**
-   * Generate a unique message ID (client-side for optimistic updates)
-   */
-  const generateMessageId = (): string => {
-    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  };
+  // `generateMessageId` is no longer used for chat messages,
+  // as IDs now come from the backend.
+  // If you still need it for purely client-side, non-stored messages,
+  // you might move it to a utility file.
 
   /**
    * Join a chat room
@@ -83,13 +110,13 @@ export default function ChatPage() {
 
     setIsConnecting(true);
 
-    // Update room state (don't clear messages here, they'll be loaded from history)
+    // Clear messages on a fresh join before history loads
     setRoomState(prev => ({
       ...prev,
       roomId,
       username,
       isConnected: false,
-      messages: [] // It's okay to clear on a fresh *join* to ensure a clean slate before history loads
+      messages: []
     }));
 
     // Join room via socket
@@ -127,29 +154,29 @@ export default function ChatPage() {
 
   /**
    * Send a message
+   * No longer performs optimistic UI update for the message itself.
+   * Relies on backend's 'message-received' event for display.
    */
-  const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
+  const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp' | 'isSelf'>) => {
     if (!roomState.isConnected) {
       addNotification('error', 'Connection Error', 'Not connected to chat room');
       return;
     }
 
-    // Create complete message (for optimistic UI update)
-    const completeMessage: ChatMessage = {
-      ...message,
-      id: generateMessageId(),
-      timestamp: new Date(),
-      isSelf: true
-    };
+    // Send only the necessary data to the backend.
+    // The backend will save it, generate ID/timestamp, and broadcast it back.
+    socket.sendMessage({
+      roomId: message.roomId,
+      sender: message.sender,
+      content: message.content,
+      imageData: message.imageData,
+      messageType: message.messageType
+    });
 
-    // Add to local messages immediately for optimistic display
-    setRoomState(prev => ({
-      ...prev,
-      messages: [...prev.messages, completeMessage]
-    }));
-
-    // Send via socket
-    socket.sendMessage(message);
+    // Optionally: If you *really* want optimistic UI for your own messages,
+    // you would add a temporary ID and then in message-received, find and update
+    // that message with the server's canonical ID. For now, this simpler approach
+    // directly fixes the double message bug by waiting for the server.
   }, [roomState.isConnected, socket, addNotification]);
 
   /**
@@ -184,54 +211,29 @@ export default function ChatPage() {
         ...prev,
         isConnected: true,
         participants: data.participants
-        // REMOVED: messages: [] -- messages will be populated by 'message-history'
       }));
 
       setIsRoomModalOpen(false);
       setIsConnecting(false);
-
-      // Add system message for self-join AFTER previous messages are loaded
-      // OR consider adding this system message only on the client if it's purely for client feedback
-      // For now, let's keep it in the backend for consistency, but ensure it has an ID
-      // If backend sends it, we'll receive it via 'message-received'
     });
 
     // Handle historical messages from the server
     const unsubscribeMessageHistory = socket.on('message-history', (data: { roomId: string; messages: ChatMessage[] }) => {
       console.log('Received message history:', data.messages);
       setRoomState(prev => {
-        // Filter out any messages that might already be optimistically added (e.g. from current user's send)
-        // And ensure IDs match
-        const existingMessageIds = new Set(prev.messages.map(msg => msg.id));
-        const newHistoricalMessages = data.messages.filter(
-          historicalMsg => !existingMessageIds.has(historicalMsg.id)
-        ).map(msg => ({
+        const historicalMessagesWithSelfFlag = data.messages.map(msg => ({
           ...msg,
-          // Ensure timestamp is a Date object, if coming as ISO string from backend
-          timestamp: new Date(msg.timestamp),
+          timestamp: new Date(msg.timestamp), // Ensure timestamp is a Date object
           isSelf: msg.sender === prev.username // Mark messages sent by self
         }));
 
-        // Append the system message for joining
-        const systemMessage: ChatMessage = {
-          id: generateMessageId(), // Ensure a unique ID for the system message
-          roomId: data.roomId,
-          sender: 'System',
-          content: 'You joined the chat',
-          messageType: 'system',
-          timestamp: new Date()
-        };
-
+        // Simply replace the messages with historical messages, ensuring correct order
         return {
           ...prev,
-          // Prepend historical messages, then existing messages, then the system message
-          // This order might need adjustment based on desired UI
-          messages: [...newHistoricalMessages, systemMessage, ...prev.messages]
-                      .sort((a, b) => (new Date(a.timestamp)).getTime() - (new Date(b.timestamp)).getTime()) // Sort by timestamp
+          messages: historicalMessagesWithSelfFlag.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
         };
       });
     });
-
 
     // User left room
     const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
@@ -242,9 +244,8 @@ export default function ChatPage() {
           ...prev,
           participants: prev.participants.filter(p => p !== data.username)
         }));
-
-        // System message for user leaving is now sent from backend, received via 'message-received'
       }
+      // System message for user leaving is now sent from backend, received via 'message-received'
     });
 
     // Message received (this will handle new messages AND system messages from backend)
@@ -252,7 +253,8 @@ export default function ChatPage() {
       console.log('Message received:', message);
 
       setRoomState(prev => {
-        // Check if message ID already exists to prevent duplicates (especially with optimistic updates)
+        // Check if message ID already exists to prevent duplicates
+        // This is crucial now that the backend sends the canonical ID.
         if (prev.messages.some(msg => msg.id === message.id)) {
           return prev; // Message already present, do nothing
         }
@@ -265,7 +267,7 @@ export default function ChatPage() {
 
         return {
           ...prev,
-          messages: [...prev.messages, receivedMessage].sort((a, b) => (new Date(a.timestamp)).getTime() - (new Date(b.timestamp)).getTime()) // Re-sort to ensure order
+          messages: [...prev.messages, receivedMessage].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()) // Re-sort to ensure order
         };
       });
     });
@@ -279,24 +281,41 @@ export default function ChatPage() {
       }
     });
 
-    // Connection status
-    const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number }) => {
+    // Connection status (participantCount might update here too)
+    const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number, username: string }) => {
       console.log('Connection status:', data);
 
       setRoomState(prev => ({
         ...prev,
         isConnected: data.connected,
-        participants: prev.participants.length > 0 ? prev.participants : getRoomParticipantsFromSocketIoAdapter(socket.socket, data.participantCount) // Fallback for initial participants if not in room-joined event
+        // Update participants array to reflect current room participants
+        // This is a more robust way to update participants if needed,
+        // but 'room-joined' and 'room-left' should handle primary updates.
+        // This particular `connection-status` event from backend might update participants
+        // by filtering out the disconnected user if `username` is provided.
+        participants: (() => {
+            const currentOnline = new Set(getRoomParticipantsFromSocketIoAdapter(socket.socket, data.participantCount));
+            if (data.connected) {
+                // If a user connects, ensure they are in the list (already done by backend via 'room-joined')
+                // This event mostly confirms counts.
+                return prev.participants; // Rely on other events for list
+            } else {
+                // If a user disconnects, remove them from the list if the event signifies it
+                // The `room-left` event already handles removing from the list.
+                return prev.participants.filter(p => p !== data.username);
+            }
+        })()
       }));
     });
 
-    // Helper to get participants from Socket.IO adapter (if needed as fallback, but 'room-joined' should provide this)
-    // This function needs to be outside or adapted as a utility
+    // Helper to get participants from Socket.IO adapter (client-side) - this is generally not reliable
+    // and should be handled by server events like 'room-joined' and 'room-left'.
+    // Removed direct usage, relying on backend.
     function getRoomParticipantsFromSocketIoAdapter(socketIoInstance: any, count: number): string[] {
-        // This is a complex thing to do accurately on the client side without server's map.
-        // Rely on 'room-joined' event for participant list.
-        // For now, just return an array of empty strings if count is available, or previous participants
-        return Array(count).fill('unknown-user');
+      // This is generally unreliable on client side for exact usernames.
+      // Rely on server-sent participant lists.
+      // Returning empty array or a placeholder as this function should ideally not be needed.
+      return [];
     }
 
 
@@ -311,7 +330,7 @@ export default function ChatPage() {
     // Cleanup function
     return () => {
       unsubscribeRoomJoined();
-      unsubscribeMessageHistory(); // Clean up new listener
+      unsubscribeMessageHistory();
       unsubscribeRoomLeft();
       unsubscribeMessageReceived();
       unsubscribeUserTyping();
@@ -321,7 +340,7 @@ export default function ChatPage() {
   }, [socket, roomState.username]); // Added roomState.username to dependencies
 
   /**
-   * Handle connection errors
+   * Handle connection errors from useSocket hook
    */
   useEffect(() => {
     if (socket.connectionError) {
@@ -333,6 +352,7 @@ export default function ChatPage() {
   /**
    * Temporarily override callState.isActive to false
    * to silence the persistent "ending video call" console message
+   * (This is an existing override, kept as is)
    */
   useEffect(() => {
     setIsCallActiveOverride(false);
@@ -378,14 +398,14 @@ export default function ChatPage() {
 
           {/* Video Call Modal with override to hide */}
           <VideoCallModal
-            isOpen={isCallActiveOverride}
+            isOpen={isCallActiveOverride} // Use the override for now
             callState={webRTC.callState}
             localVideoRef={webRTC.localVideoRef}
             remoteVideoRef={webRTC.remoteVideoRef}
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
             onToggleAudio={webRTC.toggleAudio}
-            onToggleSpeaker={webRTC.toggleSpeaker} // Make sure this prop is passed to VideoCallModal
+            onToggleSpeaker={webRTC.toggleSpeaker}
             formatCallDuration={webRTC.formatCallDuration}
           />
         </>
