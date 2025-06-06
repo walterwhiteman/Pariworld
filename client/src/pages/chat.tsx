@@ -7,37 +7,10 @@ import { ChatMessages } from '@/components/chat/ChatMessages';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
+import { ImageViewerModal } from '@/components/chat/ImageViewerModal'; // <-- ADDED THIS IMPORT
 import { useSocket } from '@/hooks/useSocket';
 import { useWebRTC } from '@/hooks/useWebRTC';
 
-// Ensure these types are correctly defined in your '@/types/chat' file
-// Example:
-// export interface ChatMessage {
-//    id: string;
-//    roomId: string;
-//    sender: string;
-//    content: string | null; // Changed to string | null
-//    imageData: string | null; // Changed to string | null
-//    messageType: 'text' | 'image' | 'system';
-//    timestamp: Date;
-//    isSelf?: boolean; // Client-side only property
-// }
-//
-// export interface RoomState {
-//    roomId: string;
-//    username: string;
-//    isConnected: boolean;
-//    participants: string[];
-//    messages: ChatMessage[];
-// }
-//
-// export interface NotificationData {
-//    id: string;
-//    type: 'success' | 'error' | 'info' | 'warning';
-//    title: string;
-//    message: string;
-//    duration?: number;
-// }
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
 /**
@@ -59,6 +32,10 @@ export default function ChatPage() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [typingUser, setTypingUser] = useState<string | undefined>();
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
+
+  // Image Viewer Modal state <-- ADDED THESE LINES
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+  const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
 
   // Override for temporarily silencing the video call state and UI
   const [isCallActiveOverride, setIsCallActiveOverride] = useState(false);
@@ -94,10 +71,21 @@ export default function ChatPage() {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
-  // `generateMessageId` is no longer used for chat messages,
-  // as IDs now come from the backend.
-  // If you still need it for purely client-side, non-stored messages,
-  // you might move it to a utility file.
+  /**
+   * Handle image click to open in viewer modal <-- ADDED THIS FUNCTION
+   */
+  const handleImageClick = useCallback((imageUrl: string) => {
+    setCurrentViewingImage(imageUrl);
+    setIsImageViewerOpen(true);
+  }, []);
+
+  /**
+   * Handle closing the image viewer modal <-- ADDED THIS FUNCTION
+   */
+  const handleCloseImageViewer = useCallback(() => {
+    setIsImageViewerOpen(false);
+    setCurrentViewingImage(null);
+  }, []);
 
   /**
    * Join a chat room
@@ -386,6 +374,7 @@ export default function ChatPage() {
             messages={roomState.messages}
             currentUsername={roomState.username}
             typingUser={typingUser}
+            onImageClick={handleImageClick} // <-- ADDED THIS PROP
           />
 
           {/* Message Input - Make it fixed at the bottom */}
@@ -407,19 +396,3 @@ export default function ChatPage() {
             remoteVideoRef={webRTC.remoteVideoRef}
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
-            onToggleAudio={webRTC.toggleAudio}
-            onToggleSpeaker={webRTC.toggleSpeaker}
-            onToggleSpeaker={webRTC.toggleSpeaker}
-            formatCallDuration={webRTC.formatCallDuration}
-          />
-        </>
-      )}
-
-      {/* Notification Toasts */}
-      <NotificationToast
-        notifications={notifications}
-        onDismiss={dismissNotification}
-      />
-    </div>
-  );
-}
