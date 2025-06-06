@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/input'; // Note: Input is imported but not used in the provided code.
 import { Textarea } from '@/components/ui/textarea';
 import { Image, Send, X } from 'lucide-react';
 import { ChatMessage } from '@/types/chat';
@@ -12,19 +12,21 @@ interface MessageInputProps {
   roomId: string;
   username: string;
   disabled?: boolean;
+  className?: string; // <-- ADDED THIS LINE
 }
 
 /**
  * Message input component with text input and image upload functionality
  * Handles message composition, image preview, and typing indicators
  */
-export function MessageInput({ 
-  onSendMessage, 
-  onTypingStart, 
-  onTypingStop, 
-  roomId, 
+export function MessageInput({
+  onSendMessage,
+  onTypingStart,
+  onTypingStop,
+  roomId,
   username,
-  disabled = false
+  disabled = false,
+  className // <-- ADDED THIS LINE
 }: MessageInputProps) {
   const [messageText, setMessageText] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -245,7 +247,8 @@ export function MessageInput({
   }, []);
 
   return (
-    <footer className="border-t border-gray-200 bg-white p-4">
+    // Apply the className to the root footer element
+    <footer className={`border-t border-gray-200 bg-white p-4 ${className}`}> {/* <-- MODIFIED THIS LINE */}
       {/* Image Preview */}
       {imagePreview && (
         <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
