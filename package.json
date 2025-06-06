@@ -18,7 +18,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^16.4.5",  // <--- THIS IS THE ONE THAT WAS MISSING FROM YOUR SERVER'S DEPENDENCIES
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "socket.io": "^4.7.5",
     "pg": "^8.11.5",
