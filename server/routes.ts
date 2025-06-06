@@ -1,18 +1,17 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from 'socket.io';
-import { storage } from "./storage";
+import { storage } from "./storage"; // Make sure storage.ts is updated as provided previously
 import { RoomParticipant } from "@shared/schema";
 
-// NOTE: This interface is for backend context. 
-// Ensure your frontend's ChatMessage interface (in client/src/types/chat.ts)
-// *explicitly* defines 'id: string;' as well.
+// NOTE: This interface is for backend context.
+// It should align with the ChatMessage interface in storage.ts and your Drizzle schema.
 interface ChatMessage {
-    id: string; // Changed to string for consistency with generateMessageId
+    id: string;
     roomId: string;
     sender: string;
-    content?: string;
-    imageData?: string;
+    content: string | null; // Changed to string | null for consistency
+    imageData: string | null; // Changed to string | null for consistency
     messageType: 'text' | 'image' | 'system';
     timestamp: Date;
 }
@@ -29,17 +28,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
+    // HTTP server for Express routes
+    const httpServer = createServer(app);
+
+    // Socket.IO server attached to the HTTP server
+    const io = new SocketIOServer(httpServer, {
+        path: '/ws',
+        cors: {
+            origin: "https://pariworld.onrender.com",
+            methods: ["GET", "POST"],
+            credentials: true
+        }
+    });
+
+    // Helper functions (defined after `io` is initialized to ensure `io.sockets.adapter` is available)
+    const getRoomParticipantCount = (roomId: string): number => {
+        return io.sockets.adapter.rooms.get(roomId)?.size || 0;
+    };
+
+    const getRoomParticipants = (roomId: string): string[] => {
+        const participants: string[] = [];
+        const roomSockets = io.sockets.adapter.rooms.get(roomId);
+        if (roomSockets) {
+            roomSockets.forEach(socketId => {
+                for (const [username, id] of usernameToSocketIdMap.entries()) {
+                    if (id === socketId) participants.push(username);
+                }
+            });
+        }
+        return participants;
+    };
+
+    // This generateMessageId is primarily for *system messages* that might not be stored in DB
+    // Regular chat messages will now get their ID from the database.
+    const generateMessageId = (): string =>
+        `sys_msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+    // This API route should technically be defined *after* `io` if it uses `io` directly.
+    // Moved it here for clarity regarding `io`'s scope.
     app.get('/api/rooms/:roomId', async (req, res) => {
         try {
             const { roomId } = req.params;
             const participants = await storage.getRoomParticipants(roomId);
             const activeParticipants = participants.filter(p => p.isActive);
 
-            // IMPORTANT: 'io' is defined below. This 'io' might not be in scope here
-            // if this route is hit before io is initialized. For a simple app, it often works
-            // if registerRoutes is called after io initialization or if io is global.
-            // If you get an 'io is undefined' error specifically for this route,
-            // you might need to reorganize your server setup.
+            // Using `io` directly here. Ensure this route is hit after io is initialized.
             const roomSockets = io.sockets.adapter.rooms.get(roomId);
             const onlineParticipants: string[] = [];
             if (roomSockets) {
@@ -60,37 +93,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             res.status(500).json({ error: 'Failed to get room info' });
         }
     });
-
-    const httpServer = createServer(app);
-
-    const io = new SocketIOServer(httpServer, {
-        path: '/ws',
-        cors: {
-            origin: "https://pariworld.onrender.com",
-            methods: ["GET", "POST"],
-            credentials: true
-        }
-    });
-
-    const getRoomParticipantCount = (roomId: string): number => {
-        return io.sockets.adapter.rooms.get(roomId)?.size || 0;
-    };
-
-    const getRoomParticipants = (roomId: string): string[] => {
-        const participants: string[] = [];
-        const roomSockets = io.sockets.adapter.rooms.get(roomId);
-        if (roomSockets) {
-            roomSockets.forEach(socketId => {
-                for (const [username, id] of usernameToSocketIdMap.entries()) {
-                    if (id === socketId) participants.push(username);
-                }
-            });
-        }
-        return participants;
-    };
-
-    const generateMessageId = (): string =>
-        `temp_msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 
     io.on('connection', (socket) => {
         console.log('New Socket.IO connection:', socket.id);
@@ -118,15 +120,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
 
             try {
+                // Fetch previous messages using the updated storage.getMessages
                 const previousMessages = await storage.getMessages(roomId, 50);
                 if (previousMessages.length) {
                     socket.emit('message-history', {
                         roomId,
                         messages: previousMessages.map(msg => ({
-                            // Ensure previous message IDs are strings
-                            id: String(msg.id), 
-                            ...msg,
-                            timestamp: msg.timestamp.toISOString()
+                            id: String(msg.id),
+                            roomId: msg.roomId,
+                            sender: msg.sender,
+                            content: msg.content,
+                            imageData: msg.imageData,
+                            messageType: msg.messageType,
+                            timestamp: msg.timestamp.toISOString() // Convert Date to ISO string for transport
                         }))
                     });
                 }
@@ -139,9 +145,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 participants: getRoomParticipants(roomId).filter(p => p !== username)
             });
 
-            // System message for user joining - now includes ID
+            // System message for user joining - using generated ID (not stored in DB)
             io.to(roomId).emit('message-received', {
-                id: generateMessageId(), // <--- ADDED: System messages now have an ID
+                id: generateMessageId(),
                 roomId,
                 sender: 'System',
                 content: `${username} joined the chat`,
@@ -167,9 +173,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     console.error('Error removing room participant:', error);
                 }
 
-                // System message for user leaving - now includes ID
+                // System message for user leaving - using generated ID (not stored in DB)
                 io.to(roomId).emit('message-received', {
-                    id: generateMessageId(), // <--- ADDED: System messages now have an ID
+                    id: generateMessageId(),
                     roomId,
                     sender: 'System',
                     content: `${username} left the chat`,
@@ -196,28 +202,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 return;
             }
 
-            const completeMessage = {
+            // Create message object to be saved. No ID or timestamp here.
+            const messageToSave = {
                 roomId,
                 sender: username,
-                content: messageData.content,
-                imageData: messageData.imageData,
+                content: messageData.content || null, // Ensure null if undefined
+                imageData: messageData.imageData || null, // Ensure null if undefined
                 messageType: messageData.messageType || 'text',
             };
 
+            let savedMessage: ChatMessage;
             try {
-                await storage.addMessage(completeMessage);
+                // Call addMessage, which now returns the inserted message with DB-generated ID and timestamp
+                savedMessage = await storage.addMessage(messageToSave);
+                console.log('Message successfully saved to DB:', savedMessage); // For debugging
             } catch (error) {
                 console.error('Error storing message:', error);
+                socket.emit('message-error', { message: 'Failed to send message.' }); // Inform sender of error
+                return;
             }
 
+            // Emit the message to the room using the canonical ID and timestamp from the database
             io.to(roomId).emit('message-received', {
-                id: generateMessageId(), // This already generated a string ID
-                roomId,
-                sender: username,
-                content: messageData.content,
-                imageData: messageData.imageData,
-                messageType: messageData.messageType || 'text',
-                timestamp: new Date().toISOString()
+                id: savedMessage.id, // <-- USE THE DB-GENERATED ID
+                roomId: savedMessage.roomId,
+                sender: savedMessage.sender,
+                content: savedMessage.content,
+                imageData: savedMessage.imageData,
+                messageType: savedMessage.messageType,
+                timestamp: savedMessage.timestamp.toISOString() // <-- USE THE DB-GENERATED TIMESTAMP
             });
 
             console.log(`Message sent in room ${roomId} by ${username}`);
@@ -272,9 +285,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     console.error('Error removing participant on disconnect:', error);
                 }
 
-                // System message for user disconnecting - now includes ID
+                // System message for user disconnecting - using generated ID (not stored in DB)
                 io.to(disconnectedRoomId).emit('message-received', {
-                    id: generateMessageId(), // <--- ADDED: System messages now have an ID
+                    id: generateMessageId(),
                     roomId: disconnectedRoomId,
                     sender: 'System',
                     content: `${disconnectedUsername} disconnected from the chat`,
@@ -295,13 +308,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     const cleanupInterval = setInterval(async () => {
-        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
         try {
+            // Assumes storage.deleteOldMessages is implemented to delete messages older than cutoff
             await storage.deleteOldMessages(cutoff);
+            console.log(`Cleaned up messages older than ${cutoff.toISOString()}`);
         } catch (error) {
             console.error('Error during message cleanup:', error);
         }
-    }, 60 * 60 * 1000);
+    }, 60 * 60 * 1000); // Run every hour
 
     httpServer.on('close', () => clearInterval(cleanupInterval));
 
