@@ -106,4 +106,50 @@ export class DatabaseStorage implements IStorage {
       imageData: message.imageData,
       messageType: message.messageType,
       // Do NOT include `id` or `timestamp` here if your DB generates them automatically.
-      // Drizzle's .returning
+      // Drizzle's .returning() will automatically pick them up.
+    }).returning(); // <-- Crucial: This makes the query return the inserted row
+
+    if (!insertedMessage) {
+        throw new Error("Failed to insert message into database.");
+    }
+
+    // Map the returned Drizzle object to your ChatMessage interface, ensuring types
+    return {
+        id: String(insertedMessage.id), // Convert to string as per ChatMessage interface
+        roomId: insertedMessage.roomId,
+        sender: insertedMessage.sender,
+        content: insertedMessage.content,
+        imageData: insertedMessage.imageData,
+        messageType: insertedMessage.messageType as 'text' | 'image' | 'system', // Type assertion
+        timestamp: new Date(insertedMessage.timestamp), // Convert to Date object
+    };
+  }
+
+  async getMessages(roomId: string, limit: number = 50): Promise<ChatMessage[]> {
+    const fetchedMessages = await db.select()
+      .from(messages)
+      .where(eq(messages.roomId, roomId))
+      .orderBy(desc(messages.timestamp)) // Order by timestamp descending to get latest first
+      .limit(limit);
+
+    // Map fetched messages to ChatMessage interface
+    const mappedMessages = fetchedMessages.map(msg => ({
+      id: String(msg.id), // Ensure ID is string
+      roomId: msg.roomId,
+      sender: msg.sender,
+      content: msg.content || null, // Ensure null if undefined/null from DB
+      imageData: msg.imageData || null, // Ensure null if undefined/null from DB
+      messageType: msg.messageType as 'text' | 'image' | 'system', // Type assertion
+      timestamp: new Date(msg.timestamp), // Convert to Date object
+    }));
+
+    // Return messages in chronological order (oldest first) for chat display
+    return mappedMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  async deleteOldMessages(cutoff: Date): Promise<void> {
+    await db.delete(messages).where(desc(messages.timestamp).lt(cutoff));
+  }
+}
+
+export const storage = new DatabaseStorage();
