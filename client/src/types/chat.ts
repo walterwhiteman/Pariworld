@@ -2,7 +2,7 @@
 export interface ChatMessage {
     id: string; // CORRECT: This is now correctly 'string'
     roomId: string;
-    username: string; // Changed from 'sender' to 'username' for consistency
+    sender: string;
     content?: string;
     imageData?: string;
     messageType: 'text' | 'image' | 'system';
@@ -13,60 +13,56 @@ export interface ChatMessage {
 // Socket event NAMES (as an enum for runtime usage)
 export enum SocketEvents {
     // Client to server events
-    JoinRoom = 'room:join',
-    LeaveRoom = 'room:leave',
-    SendMessage = 'chat:message',
-    TypingStart = 'chat:typing_start',
-    TypingStop = 'chat:typing_stop',
+    JoinRoom = 'join-room',
+    LeaveRoom = 'leave-room',
+    SendMessage = 'send-message',
+    TypingStart = 'typing-start',
+    TypingStop = 'typing-stop',
     WebRTCSignal = 'webrtc-signal', // ADDED: WebRTC signaling event
 
     // Server to client events
     ConnectionEstablished = 'connection-established', // ADDED: Event emitted on successful socket connection
-    RoomJoined = 'room:joined',
-    RoomLeft = 'room:left',
-    MessageReceived = 'chat:message_received',
-    // RENAMED from MessageHistory for consistency with backend:
-    RoomMessagesLoaded = 'room:messages_loaded',
-    TypingStatus = 'chat:typing_status', // Renamed from UserTyping for consistency
-    ParticipantUpdate = 'room:participant_update', // Added for participant count updates
+    RoomJoined = 'room-joined',
+    RoomLeft = 'room-left',
+    MessageReceived = 'message-received',
+    MessageHistory = 'message-history', // ADDED: From previous backend code, for initial messages
+    UserTyping = 'user-typing',
     Error = 'error',
-    // ConnectionStatus removed as its role is largely handled by other events/useSocket internal state
+    ConnectionStatus = 'connection-status',
 }
 
 // Socket event HANDLERS (as an interface for type checking)
 export interface SocketEventHandlers {
     // Client emits (to server)
-    'room:join': (data: { roomId: string; username: string }) => void;
-    'room:leave': (data: { roomId: string; username: string }) => void;
-    // Corrected SendMessage payload to match backend expectation
-    'chat:message': (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
-    'chat:typing_start': (data: { roomId: string; username: string }) => void;
-    'chat:typing_stop': (data: { roomId: string; username: string }) => void;
+    'join-room': (data: { roomId: string; username: string }) => void;
+    'leave-room': (data: { roomId: string; username: string }) => void;
+    'send-message': (message: Omit<ChatMessage, 'id' | 'timestamp' | 'roomId' | 'sender'>) => void;
+    'typing-start': (data: { roomId: string; username: string }) => void;
+    'typing-stop': (data: { roomId: string; username: string }) => void;
     'webrtc-signal': (payload: { roomId: string; sender: string; recipient: string; type: string; data: any }) => void; // ADDED: WebRTC signal payload
 
     // Server emits (to client)
     'connection-established': (payload: { connected: boolean }) => void; // ADDED: Event signature
-    'room:joined': (data: { roomId: string; username: string }) => void; // Payload simplified from participants: string[]
-    'room:left': (data: { roomId: string; username: string }) => void;
-    'chat:message_received': (message: ChatMessage) => void;
-    // Corrected event name and payload for historical messages
-    'room:messages_loaded': (messages: ChatMessage[]) => void;
-    'chat:typing_status': (data: { roomId: string; username: string; isTyping: boolean }) => void; // Corrected payload
-    'room:participant_update': (data: { roomId: string; count: number }) => void; // Added signature for participant updates
+    'room-joined': (data: { roomId: string; participants: string[] }) => void;
+    'room-left': (data: { roomId: string; username: string }) => void;
+    'message-received': (message: ChatMessage) => void;
+    'message-history': (payload: { roomId: string; messages: ChatMessage[] }) => void; // ADDED: Event signature
+    'user-typing': (data: { username: string; isTyping: boolean }) => void;
     'error': (data: { message: string }) => void;
-    // 'connection-status' removed from handlers as it's not directly emitted by backend for client consumption in this way
+    'connection-status': (data: { connected: boolean; participantCount: number; username: string }) => void; // MODIFIED: Added username
     'webrtc-signal': (payload: { roomId: string; sender: string; recipient: string; type: string; data: any }) => void; // ADDED: WebRTC signal payload
 
     // Generic fallback for other events if needed, though specific is better
     [key: string]: (...args: any[]) => void;
 }
 
+
 // Room state
 export interface RoomState {
     roomId: string;
     username: string;
     isConnected: boolean;
-    participants: { id: string, username: string, isTyping: boolean }[]; // Changed to objects to track typing status
+    participants: string[];
     messages: ChatMessage[];
 }
 
@@ -89,11 +85,11 @@ export interface VideoCallState {
     callDuration: number;
 }
 
-// WebRTC signaling messages
+// WebRTC signaling messages - Your provided interface is perfect for this.
 export interface WebRTCSignal {
     type: 'offer' | 'answer' | 'ice-candidate' | 'call-start' | 'call-end';
     data: any;
     roomId: string;
     sender: string;
-    recipient?: string;
+    recipient?: string; // ADDED: Recipient is used in the backend signal forwarding
 }
