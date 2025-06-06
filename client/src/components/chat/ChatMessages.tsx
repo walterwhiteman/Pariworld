@@ -14,7 +14,7 @@ interface ChatMessagesProps {
  */
 export function ChatMessages({ messages, currentUsername, typingUser }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLHTMLDivElement>(null); // Corrected type to HTMLDivElement
+  const containerRef = useRef<HTMLDivElement>(null);
 
   /**
    * Auto-scroll to bottom when new messages arrive
@@ -29,9 +29,7 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
    * Format timestamp for display
    */
   const formatTime = (timestamp: Date): string => {
-    // Ensure timestamp is a Date object, even if it comes as a string from JSON
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
-    return date.toLocaleTimeString([], { 
+    return new Date(timestamp).toLocaleTimeString([], { 
       hour: '2-digit', 
       minute: '2-digit' 
     });
@@ -41,7 +39,6 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
    * Get initials from username
    */
   const getInitials = (username: string): string => {
-    if (!username) return ''; // Handle empty username gracefully
     return username
       .split(' ')
       .map(word => word.charAt(0))
@@ -54,8 +51,7 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
    * Render a message bubble
    */
   const renderMessage = (message: ChatMessage) => {
-    // Corrected to use message.username instead of message.sender
-    const isSelf = message.username === currentUsername;
+    const isSelf = message.sender === currentUsername;
     const isSystem = message.messageType === 'system';
 
     // System messages (join/leave notifications)
@@ -81,10 +77,9 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
             isSelf ? 'bg-blue-600' : 'bg-gray-300'
           }`}
         >
-          {/* Corrected to use message.username */}
-          {getInitials(message.username) ? (
+          {getInitials(message.sender) ? (
             <span className={`text-sm font-medium ${isSelf ? 'text-white' : 'text-gray-600'}`}>
-              {getInitials(message.username)}
+              {getInitials(message.sender)}
             </span>
           ) : (
             <User className={`h-4 w-4 ${isSelf ? 'text-white' : 'text-gray-600'}`} />
@@ -124,8 +119,7 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
           {/* Message Info */}
           <div className={`mt-1 flex items-center space-x-2 ${isSelf ? 'justify-end' : 'justify-start'}`}>
             {!isSelf && (
-              // Corrected to use message.username
-              <span className="text-xs text-gray-500">{message.username}</span>
+              <span className="text-xs text-gray-500">{message.sender}</span>
             )}
             <span className="text-xs text-gray-400">
               {formatTime(message.timestamp)}
@@ -170,9 +164,6 @@ export function ChatMessages({ messages, currentUsername, typingUser }: ChatMess
   };
 
   return (
-    // You might need to adjust the `pt-` (padding-top) here or in the parent component
-    // that wraps ChatMessages, if your fixed header is overlapping content.
-    // Example: <main className="flex flex-1 flex-col overflow-hidden pt-16"> if header is h-16
     <main className="flex flex-1 flex-col overflow-hidden">
       <div 
         ref={containerRef}
