@@ -18,6 +18,9 @@ import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
  * Manages room state, messaging, notifications, and video calling
  */
 export default function ChatPage() {
+  // Add these console logs for debugging component lifecycle
+  console.log('ChatPage: Rendering component.');
+
   // Room and user state
   const [roomState, setRoomState] = useState<RoomState>({
     roomId: '',
@@ -37,14 +40,17 @@ export default function ChatPage() {
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
 
-  // --- Removed: isCallActiveOverride state and related useEffect ---
-  // The VideoCallModal's visibility is now solely managed by webRTC.callState.isActive.
-
   // Hooks
   const socket = useSocket();
-  // Ensure the correct Socket.IO client instance is passed to useWebRTC.
-  // Assuming 'socket' directly contains the client or exposes its methods.
   const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
+
+  // Add this useEffect to track ChatPage's mount/unmount
+  useEffect(() => {
+      console.log('ChatPage: Component mounted.');
+      return () => {
+          console.log('ChatPage: Component unmounted.');
+      };
+  }, []);
 
 
   /**
@@ -163,11 +169,6 @@ export default function ChatPage() {
       imageData: message.imageData,
       messageType: message.messageType
     });
-
-    // Optionally: If you *really* want optimistic UI for your own messages,
-    // you would add a temporary ID and then in message-received, find and update
-    // that message with the server's canonical ID. For now, this simpler approach
-    // directly fixes the double message bug by waiting for the server.
   }, [roomState.isConnected, socket, addNotification]);
 
   /**
@@ -192,7 +193,12 @@ export default function ChatPage() {
    * Set up socket event listeners
    */
   useEffect(() => {
-    if (!socket.on) return;
+    console.log('ChatPage: useEffect (Socket Listeners) Mounted.');
+
+    if (!socket.on) {
+        console.warn('ChatPage: Socket instance not ready for event listeners.');
+        return;
+    }
 
     // Room joined successfully
     const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
@@ -201,7 +207,7 @@ export default function ChatPage() {
       setRoomState(prev => ({
         ...prev,
         isConnected: true,
-        participants: data.participants
+        participants: data.participants // Backend provides actual participant list
       }));
 
       setIsRoomModalOpen(false);
@@ -236,7 +242,6 @@ export default function ChatPage() {
           participants: prev.participants.filter(p => p !== data.username)
         }));
       }
-      // System message for user leaving is now sent from backend, received via 'message-received'
     });
 
     // Message received (this will handle new messages AND system messages from backend)
@@ -245,7 +250,6 @@ export default function ChatPage() {
 
       setRoomState(prev => {
         // Check if message ID already exists to prevent duplicates
-        // This is crucial now that the backend sends the canonical ID.
         if (prev.messages.some(msg => msg.id === message.id)) {
           return prev; // Message already present, do nothing
         }
@@ -276,39 +280,19 @@ export default function ChatPage() {
     const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number, username: string }) => {
       console.log('Connection status:', data);
 
-      setRoomState(prev => ({
-        ...prev,
-        isConnected: data.connected,
-        // Update participants array to reflect current room participants
-        // This is a more robust way to update participants if needed,
-        // but 'room-joined' and 'room-left' should handle primary updates.
-        // This particular `connection-status` event from backend might update participants
-        // by filtering out the disconnected user if `username` is provided.
-        participants: (() => {
-            const currentOnline = new Set(getRoomParticipantsFromSocketIoAdapter(socket.socket, data.participantCount));
-            if (data.connected) {
-                // If a user connects, ensure they are in the list (already done by backend via 'room-joined')
-                // This event mostly confirms counts.
-                return prev.participants; // Rely on other events for list
-            } else {
-                // If a user disconnects, remove them from the list if the event signifies it
-                // The `room-left` event already handles removing from the list.
-                return prev.participants.filter(p => p !== data.username);
-            }
-        })()
-      }));
+      setRoomState(prev => {
+        // ONLY update isConnected here.
+        // Rely on 'room-joined' and 'room-left' events for actual participant list changes.
+        // This prevents unnecessary re-creation of the participants array.
+        return {
+          ...prev,
+          isConnected: data.connected,
+          // If you need to reflect participantCount (number) specifically, you can add it as a separate state.
+          // For now, we are relying on `roomState.participants.length` to get the count.
+          // participantCount: data.participantCount, // Optional, if you want to store this number separately
+        };
+      });
     });
-
-    // Helper to get participants from Socket.IO adapter (client-side) - this is generally not reliable
-    // and should be handled by server events like 'room-joined' and 'room-left'.
-    // Removed direct usage, relying on backend.
-    function getRoomParticipantsFromSocketIoAdapter(socketIoInstance: any, count: number): string[] {
-      // This is generally unreliable on client side for exact usernames.
-      // Rely on server-sent participant lists.
-      // Returning empty array or a placeholder as this function should ideally not be needed.
-      return [];
-    }
-
 
     // Error handling
     const unsubscribeError = socket.on('error', (data: { message: string }) => {
@@ -318,8 +302,9 @@ export default function ChatPage() {
       setIsConnecting(false);
     });
 
-    // Cleanup function
+    // Cleanup function for socket listeners
     return () => {
+      console.log('ChatPage: useEffect (Socket Listeners) Cleanup - ChatPage is unmounting or dependencies changed.');
       unsubscribeRoomJoined();
       unsubscribeMessageHistory();
       unsubscribeRoomLeft();
@@ -334,16 +319,16 @@ export default function ChatPage() {
    * Handle connection errors from useSocket hook
    */
   useEffect(() => {
+    console.log('ChatPage: useEffect (Connection Error) Mounted.');
     if (socket.connectionError) {
       addNotification('error', 'Connection Failed', socket.connectionError);
       setIsConnecting(false);
     }
+    return () => {
+        console.log('ChatPage: useEffect (Connection Error) Cleanup.');
+    }
   }, [socket.connectionError, addNotification]);
 
-  // --- Removed: This useEffect was for the override state, no longer needed ---
-  // useEffect(() => {
-  //   setIsCallActiveOverride(false);
-  // }, []);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
@@ -367,8 +352,7 @@ export default function ChatPage() {
             onLeaveRoom={handleLeaveRoom}
           />
 
-          {/* Chat Messages - This component's internal 'main' tag already has flex-1 and overflow-hidden,
-                             and its inner div has overflow-y-auto, so messages will scroll here. */}
+          {/* Chat Messages */}
           <ChatMessages
             messages={roomState.messages}
             currentUsername={roomState.username}
@@ -389,14 +373,13 @@ export default function ChatPage() {
 
           {/* Video Call Modal */}
           <VideoCallModal
-            isOpen={webRTC.callState.isActive} // Updated: Now directly uses webRTC.callState.isActive
+            isOpen={webRTC.callState.isActive}
             callState={webRTC.callState}
             localVideoRef={webRTC.localVideoRef}
             remoteVideoRef={webRTC.remoteVideoRef}
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
             onToggleAudio={webRTC.toggleAudio}
-            // Removed: onToggleSpeaker prop as it's not defined in VideoCallModal.tsx
             formatCallDuration={webRTC.formatCallDuration}
           />
         </>
