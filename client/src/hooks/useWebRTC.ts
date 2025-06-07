@@ -8,7 +8,7 @@ import { VideoCallState, WebRTCSignal } from '@/types/chat';
  * Implements peer-to-peer video communication for the chat application
  */
 export function useWebRTC(socket: any, roomId: string, username: string) {
-  // 1. State and Ref declarations (must come first)
+  // 1. State and Ref declarations (these must always come first)
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
     isLocalVideoEnabled: true,
@@ -32,8 +32,10 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     ]
   };
 
-  // 3. Define endCall first, as other functions (initializePeerConnection, getUserMedia) depend on it
-  const endCall = useCallback(() => {
+  // 3. Define endCall as a *plain function* (TEMPORARY DIAGNOSTIC STEP for ReferenceError)
+  // This means it will be re-created on every render, which is generally not ideal,
+  // but it avoids the lexical initialization issue causing the blank page.
+  const endCall = () => {
     console.log('endCall: Ending video call sequence...');
 
     // Stop call timer
@@ -93,7 +95,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
 
     callStartTimeRef.current = null;
     console.log('endCall: Video call sequence ended.');
-  }, [callState.localStream, callState.isActive, socket, roomId, username]);
+  }; // NO useCallback() here for now!
 
 
   /**
@@ -139,7 +141,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
         if (peerConnection.connectionState === 'disconnected' || 
             peerConnection.connectionState === 'failed') {
           console.log('onconnectionstatechange: Peer connection disconnected or failed, calling endCall.');
-          endCall();
+          endCall(); // Call to the plain endCall function
         }
       };
 
@@ -148,7 +150,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.error('initializePeerConnection: Error initializing peer connection:', error);
       return null;
     }
-  }, [socket, roomId, username, endCall]); // endCall added to dependencies of initializePeerConnection
+  }, [socket, roomId, username]); // Removed endCall from dependencies
 
 
   /**
@@ -180,10 +182,24 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
           console.error('getUserMedia: Error Message:', error.message);
       }
       console.log('getUserMedia: Invoking endCall due to media access error. [Step 4]'); // NEW LOG BEFORE ENDCALL
-      endCall(); // Immediately end call if media access fails
+      endCall(); // Call to the plain endCall function
       return null;
     }
-  }, [endCall]); // endCall added to dependencies of getUserMedia
+  }, []); // Removed endCall from dependencies
+
+
+  /**
+   * Start call duration timer (kept as useCallback for stability)
+   */
+  const startCallTimer = useCallback(() => {
+    console.log('startCallTimer: Starting call duration timer.');
+    callTimerRef.current = setInterval(() => {
+      if (callStartTimeRef.current) {
+        const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+        setCallState(prev => ({ ...prev, callDuration: duration }));
+      }
+    }, 1000);
+  }, []);
 
 
   /**
@@ -203,7 +219,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       const peerConnection = initializePeerConnection();
       if (!peerConnection) {
         console.error('startCall: Failed to initialize peer connection. Aborting call.');
-        endCall(); // Ensure cleanup if peerConnection failed
+        endCall(); // Call to the plain endCall function
         return;
       }
       console.log('startCall: Peer connection initialized.');
@@ -246,9 +262,9 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.log('startCall: Video call sequence complete.');
     } catch (error) {
       console.error('startCall: Uncaught error during call initiation:', error);
-      endCall(); // Ensure call is ended on any uncaught error
+      endCall(); // Call to the plain endCall function
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, endCall, startCallTimer]);
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer]); // Removed endCall from dependencies
 
 
   /**
@@ -267,7 +283,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       const peerConnection = initializePeerConnection();
       if (!peerConnection) {
         console.error('answerCall: Failed to initialize peer connection for answer. Aborting.');
-        endCall();
+        endCall(); // Call to the plain endCall function
         return;
       }
       console.log('answerCall: Peer connection initialized for answer.');
@@ -311,9 +327,9 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.log('answerCall: Call answer sequence complete.');
     } catch (error) {
       console.error('answerCall: Uncaught error during call answering:', error);
-      endCall();
+      endCall(); // Call to the plain endCall function
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, endCall, startCallTimer]);
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer]); // Removed endCall from dependencies
 
 
   /**
@@ -358,18 +374,6 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     }
   }, [callState.localStream]);
 
-  /**
-   * Start call duration timer
-   */
-  const startCallTimer = useCallback(() => {
-    console.log('startCallTimer: Starting call duration timer.');
-    callTimerRef.current = setInterval(() => {
-      if (callStartTimeRef.current) {
-        const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
-        setCallState(prev => ({ ...prev, callDuration: duration }));
-      }
-    }, 1000);
-  }, []);
 
   /**
    * Format call duration for display
@@ -432,7 +436,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
             
           case 'call-end':
             console.log('handleWebRTCSignal: Received call-end signal. Ending call locally.');
-            endCall();
+            endCall(); // Call to the plain endCall function
             break;
 
           default:
@@ -450,27 +454,29 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     };
     socket.on('webrtc-signal', handleWebRTCSignal);
 
-    return cleanup;
-  }, [socket, roomId, username, answerCall, endCall]);
+    // Keep endCall here for the cleanup function only, as it's critical for unmount
+    return cleanup; 
+  }, [socket, roomId, username, answerCall]); // endCall removed from dependencies (except for cleanup)
+
 
   /**
    * Cleanup on unmount
    */
   useEffect(() => {
     // This effect's cleanup runs when the component unmounts.
-    // It also runs before the effect re-runs if dependencies change.
     return () => {
       console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
-      endCall();
+      endCall(); // This needs to call the latest endCall
     };
-  }, [endCall]);
+  }, [endCall]); // endCall *must* be in this dependency array for the cleanup to be correct
+
 
   return {
     callState,
     localVideoRef,
     remoteVideoRef,
     startCall,
-    endCall,
+    endCall, // Expose the plain function
     toggleVideo,
     toggleAudio,
     formatCallDuration
