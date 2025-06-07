@@ -9,7 +9,7 @@ import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { ImageViewerModal } from '@/components/chat/ImageViewerModal';
 import { useSocket } from '@/hooks/useSocket';
-import { useWebRTC } from '@/hooks/useWebRTC';
+import { useWebRTC } from '@/hooks/useWebRTC'; // We'll modify this import if startCall takes an arg
 
 import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
 
@@ -18,7 +18,6 @@ import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
  * Manages room state, messaging, notifications, and video calling
  */
 export default function ChatPage() {
-  // Add these console logs for debugging component lifecycle
   console.log('ChatPage: Rendering component.');
 
   // Room and user state
@@ -34,7 +33,8 @@ export default function ChatPage() {
   const [isRoomModalOpen, setIsRoomModalOpen] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [typingUser, setTypingUser] = useState<string | undefined>();
-  const [notifications, setNotifications] = useState<NotificationData[]>([]);
+  const [notifications, setNotifications] = useState<NotificationData[]>([]
+  );
 
   // Image Viewer Modal state
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
@@ -42,7 +42,18 @@ export default function ChatPage() {
 
   // Hooks
   const socket = useSocket();
-  const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
+
+  // --- NEW: Determine the recipient for a 1-on-1 call ---
+  // If participants array contains more than just yourself, the other one is the recipient.
+  // This assumes a 1-on-1 chat context for video calls.
+  const recipientUsername = roomState.participants.find(
+    (p) => p !== roomState.username
+  );
+
+  // --- MODIFIED: Pass recipientUsername to useWebRTC ---
+  // You can pass it as a prop to useWebRTC, OR, pass it directly to the startCall function.
+  // Passing it to useWebRTC is cleaner if all WebRTC signals need this context.
+  const webRTC = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername); // Pass recipientUsername here
 
   // Add this useEffect to track ChatPage's mount/unmount
   useEffect(() => {
@@ -51,7 +62,6 @@ export default function ChatPage() {
           console.log('ChatPage: Component unmounted.');
       };
   }, []);
-
 
   /**
    * Add a notification
@@ -329,6 +339,17 @@ export default function ChatPage() {
     }
   }, [socket.connectionError, addNotification]);
 
+  // --- NEW: Handle starting the video call with the recipient ---
+  const handleStartVideoCall = useCallback(() => {
+    if (!recipientUsername) {
+      addNotification('error', 'Call Error', 'No other user available for a call.');
+      console.warn('handleStartVideoCall: No recipient username found.');
+      return;
+    }
+    // Now call the startCall function from useWebRTC, which now knows the recipient
+    webRTC.startCall();
+  }, [recipientUsername, webRTC, addNotification]);
+
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
@@ -348,7 +369,7 @@ export default function ChatPage() {
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
-            onStartVideoCall={webRTC.startCall}
+            onStartVideoCall={handleStartVideoCall} {/* --- MODIFIED: Call new handler --- */}
             onLeaveRoom={handleLeaveRoom}
           />
 
