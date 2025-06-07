@@ -91,8 +91,8 @@ export function MessageInput({
     }
 
     // Check original file size (a reasonable limit before even processing)
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit for original file
-      alert('Original image size must be less than 5MB before processing. Please select a smaller image.');
+    if (file.size > 10 * 1024 * 1024) { // 5MB limit for original file
+      alert('Original image size must be less than 10MB before processing. Please select a smaller image.');
       return;
     }
 
