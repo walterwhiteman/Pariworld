@@ -1,529 +1,679 @@
 // src/hooks/useWebRTC.ts
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Socket } from '@/hooks/useSocket'; // Adjust path if necessary
-// Ensure you have `webrtc-types` installed or define these types if not
-// For example, you can add 'webrtc-types' to your devDependencies: `npm install --save-dev webrtc-types`
-import { RTCIceCandidate, RTCSessionDescription } from 'webrtc-types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { WebRTCSignal } from '@/types/chat'; // Assuming WebRTCSignal is defined like { type: string, data: any, roomId: string, sender: string, recipient?: string }
 
-
-// Define the shape of the WebRTC call state
+/**
+ * Interface for the video call state.
+ * Expanded to include incoming call details for UI management.
+ */
 export interface VideoCallState {
-    isActive: boolean;
+    isActive: boolean; // True if a call is currently active (in progress)
+    isLocalVideoEnabled: boolean;
+    isLocalAudioEnabled: boolean;
     localStream: MediaStream | null;
     remoteStream: MediaStream | null;
-    isLocalAudioEnabled: boolean;
-    isLocalVideoEnabled: boolean;
-    callDuration: number;
-    incomingCallOffer: RTCSessionDescription | null; // Stores the SDP offer for an incoming call
-    incomingCallerUsername: string | null; // Stores the username of the incoming caller
+    callDuration: number; // In seconds
+    incomingCallOffer: RTCSessionDescriptionInit | null; // Stores the offer if an incoming call is pending
+    incomingCallerUsername: string | null; // Stores the username of the person calling
 }
 
-// Configuration for WebRTC peer connection
-const peerConnectionConfig = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        // Add more STUN/TURN servers for robustness in production
-        // { urls: 'turn:YOUR_TURN_SERVER_ADDRESS:YOUR_TURN_SERVER_PORT', username: 'YOUR_USERNAME', credential: 'YOUR_PASSWORD' },
-    ],
-};
-
-export const useWebRTC = (
-    socket: Socket,
-    roomId: string,
-    currentUsername: string,
-    recipientUsername: string | undefined // The user to call in a 1-on-1 chat
-) => {
-    console.log('useWebRTC: Hook initialized with recipient:', recipientUsername);
-
+/**
+ * Custom hook for WebRTC video calling functionality
+ * Implements peer-to-peer video communication for the chat application
+ */
+export function useWebRTC(socket: any, roomId: string, username: string, recipientId: string | undefined) {
+    // 1. State and Ref declarations
     const [callState, setCallState] = useState<VideoCallState>({
         isActive: false,
+        isLocalVideoEnabled: true,
+        isLocalAudioEnabled: true,
         localStream: null,
         remoteStream: null,
-        isLocalAudioEnabled: true,
-        isLocalVideoEnabled: true,
         callDuration: 0,
-        incomingCallOffer: null,
-        incomingCallerUsername: null,
+        incomingCallOffer: null, // Initial state for incoming call
+        incomingCallerUsername: null, // Initial state for incoming caller
     });
 
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+    const localVideoRef = useRef<HTMLVideoElement | null>(null);
+    const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+    const callStartTimeRef = useRef<number | null>(null);
     const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Refs for video elements (to be passed to components)
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    // Using a ref to hold the current `endCall` function to avoid stale closures
+    // when `endCall` is called from inside `useEffect` or `onconnectionstatechange`.
+    const endCallRef = useRef<(() => void) | null>(null);
 
-    // --- Helper function to reset call state ---
-    const resetCallState = useCallback(() => {
-        console.log('useWebRTC: resetCallState called.');
 
+    // 2. Constants like rtcConfig
+    // IMPORTANT: For better call quality and reliability across different network types (e.g., behind strict NATs),
+    // you should add TURN servers here. STUN servers are for direct peer-to-peer connections.
+    const rtcConfig: RTCConfiguration = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            // // Example TURN server (replace with your actual TURN server details)
+            // {
+            //     urls: 'turn:YOUR_TURN_SERVER_IP:3478',
+            //     username: 'YOUR_TURN_USERNAME',
+            //     credential: 'YOUR_TURN_PASSWORD'
+            // }
+        ]
+    };
+
+    /**
+     * Defines the endCall function as a useCallback to stabilize its reference.
+     * Dependencies are carefully chosen to prevent unnecessary re-creations.
+     */
+    const endCall = useCallback(() => {
+        console.log('endCall: Ending video call sequence...');
+
+        // Stop call timer
         if (callTimerRef.current) {
             clearInterval(callTimerRef.current);
             callTimerRef.current = null;
-            console.log('useWebRTC: Call timer cleared.');
+            console.log('endCall: Call timer cleared.');
         }
 
-        // Stop all tracks on local stream and close peer connection
-        if (callState.localStream) {
-            callState.localStream.getTracks().forEach(track => track.stop());
-            console.log('useWebRTC: Local stream tracks stopped.');
-        }
+        // Close peer connection
         if (peerConnectionRef.current) {
-            console.log('useWebRTC: Closing peer connection.');
-            peerConnectionRef.current.ontrack = null;
-            peerConnectionRef.current.onicecandidate = null;
-            peerConnectionRef.current.onnegotiationneeded = null;
-            peerConnectionRef.current.oniceconnectionstatechange = null;
-            peerConnectionRef.current.onconnectionstatechange = null;
-            peerConnectionRef.current.ondatachannel = null;
             peerConnectionRef.current.close();
             peerConnectionRef.current = null;
-            console.log('useWebRTC: Peer connection closed and ref cleared.');
+            console.log('endCall: Peer connection closed.');
+        }
+
+        // Stop local stream tracks
+        if (callState.localStream) {
+            callState.localStream.getTracks().forEach(track => {
+                track.stop();
+                console.log(`endCall: Stopped local stream track: ${track.kind}`);
+            });
+            console.log('endCall: Local stream tracks stopped.');
         }
 
         // Clear video elements srcObject
         if (localVideoRef.current) {
             localVideoRef.current.srcObject = null;
-            console.log('useWebRTC: Local video ref srcObject cleared.');
+            console.log('endCall: Local video ref srcObject cleared.');
         }
         if (remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = null;
-            console.log('useWebRTC: Remote video ref srcObject cleared.');
+            console.log('endCall: Remote video ref srcObject cleared.');
         }
 
+        // Notify other peer that call has ended (only if call was active and there was a recipient)
+        // Ensure recipientId exists and is the correct peer to notify
+        // This is important because `recipientId` is for the OUTGOING call,
+        // but if we were the receiver, we should notify the INCOMING caller.
+        const activePeerId = callState.incomingCallerUsername || recipientId;
+
+        if (socket?.emit && callState.isActive && activePeerId) {
+            console.log(`endCall: Emitting call-end signal to ${activePeerId}.`);
+            socket.emit('webrtc-signal', {
+                type: 'call-end',
+                data: {},
+                roomId,
+                sender: username,
+                recipient: activePeerId
+            });
+        } else {
+            console.warn('endCall: Not emitting call-end signal (socket not ready, call not active, or no activePeerId).');
+        }
+
+        // Reset call state - this WILL cause a re-render
         setCallState({
             isActive: false,
+            isLocalVideoEnabled: true,
+            isLocalAudioEnabled: true,
             localStream: null,
             remoteStream: null,
-            isLocalAudioEnabled: true,
-            isLocalVideoEnabled: true,
             callDuration: 0,
-            incomingCallOffer: null,
-            incomingCallerUsername: null,
+            incomingCallOffer: null, // Clear any pending incoming call
+            incomingCallerUsername: null, // Clear any pending incoming caller
         });
-        console.log('useWebRTC: Call state fully reset.');
-    }, [callState.localStream]);
+        console.log('endCall: Call state reset.');
+
+        callStartTimeRef.current = null;
+        console.log('endCall: Video call sequence ended.');
+    }, [
+        socket,
+        roomId,
+        username,
+        setCallState,
+        callState.localStream,
+        callState.isActive,
+        recipientId,
+        callState.incomingCallerUsername // Added to dependencies
+    ]);
+
+    // Update the ref to the latest `endCall` function whenever `endCall` is re-created.
+    useEffect(() => {
+        endCallRef.current = endCall;
+    }, [endCall]);
 
 
-    // --- Media Acquisition ---
-    const getMedia = useCallback(async () => {
-        console.log('useWebRTC: Attempting to get local media...');
+    /**
+     * Initialize WebRTC peer connection
+     */
+    const initializePeerConnection = useCallback(() => {
+        console.log('initializePeerConnection: Attempting to create RTCPeerConnection...');
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            console.log('useWebRTC: Successfully got local media stream:', stream);
-            setCallState(prev => ({
-                ...prev,
-                localStream: stream,
-                isLocalAudioEnabled: stream.getAudioTracks().length > 0,
-                isLocalVideoEnabled: stream.getVideoTracks().length > 0,
-            }));
-            // Attach stream to local video ref immediately
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = stream;
-                console.log('useWebRTC: Local stream attached to localVideoRef.current.');
-            } else {
-                console.warn('useWebRTC: localVideoRef.current is null when trying to attach stream.');
-            }
-            return stream;
+            const peerConnection = new RTCPeerConnection(rtcConfig);
+            peerConnectionRef.current = peerConnection;
+            console.log('initializePeerConnection: RTCPeerConnection created.');
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                // Determine the correct recipient for the ICE candidate
+                // If we are making an outgoing call, recipientId is the target.
+                // If we are answering an incoming call, callState.incomingCallerUsername is the target.
+                const currentCallRecipient = callState.incomingCallerUsername || recipientId;
+
+                if (event.candidate && socket?.emit && currentCallRecipient) {
+                    console.log(`onicecandidate: Sending ICE candidate to ${currentCallRecipient}.`);
+                    socket.emit('webrtc-signal', {
+                        type: 'ice-candidate',
+                        data: event.candidate,
+                        roomId,
+                        sender: username,
+                        recipient: currentCallRecipient
+                    });
+                } else {
+                    console.log('onicecandidate: No more ICE candidates, event.candidate is null, or socket/recipient not ready.');
+                }
+            };
+
+            // Handle remote stream
+            peerConnection.ontrack = (event) => {
+                console.log('ontrack: Received remote stream/track.');
+                // Note: event.streams is an array, typically it contains one MediaStream
+                const [remoteStream] = event.streams;
+                if (remoteStream) {
+                    setCallState(prev => ({ ...prev, remoteStream }));
+
+                    if (remoteVideoRef.current) {
+                        remoteVideoRef.current.srcObject = remoteStream;
+                        console.log('ontrack: Remote stream set on video element.');
+                    }
+                } else {
+                    console.warn('ontrack: Received event but no remote stream found.');
+                }
+            };
+
+            // Handle connection state changes
+            peerConnection.onconnectionstatechange = () => {
+                const pc = peerConnectionRef.current;
+                if (!pc) return;
+
+                console.log('onconnectionstatechange: Connection state:', pc.connectionState);
+                if (pc.connectionState === 'disconnected' ||
+                    pc.connectionState === 'failed' ||
+                    pc.connectionState === 'closed') { // Added 'closed' state
+                    console.log('onconnectionstatechange: Peer connection disconnected, failed, or closed. Ending call locally via ref.');
+                    endCallRef.current?.(); // Use the ref
+                } else if (pc.connectionState === 'connected') {
+                    console.log('onconnectionstatechange: Peer connection established!');
+                    // This is a good point to start the call timer if it hasn't already.
+                    if (!callStartTimeRef.current) {
+                         callStartTimeRef.current = Date.now();
+                         startCallTimer();
+                    }
+                }
+            };
+
+            return peerConnection;
         } catch (error) {
-            console.error('useWebRTC: Error accessing media devices:', error);
-            // Add notification for user
-            socket.emit('client-error', { type: 'media-access', message: `Failed to access camera/microphone: ${error instanceof Error ? error.message : String(error)}` });
-            resetCallState(); // Reset state on media access error
+            console.error('initializePeerConnection: Error initializing peer connection:', error);
+            endCallRef.current?.(); // Use the ref to ensure cleanup
             return null;
         }
-    }, [socket, resetCallState]);
+    }, [socket, roomId, username, recipientId, setCallState, callState.incomingCallerUsername]);
 
 
-    // --- Peer Connection Setup ---
-    const createPeerConnection = useCallback((isCaller: boolean) => {
-        console.log(`useWebRTC: Creating new RTCPeerConnection (isCaller: ${isCaller}).`);
-        const pc = new RTCPeerConnection(peerConnectionConfig);
-        peerConnectionRef.current = pc;
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('useWebRTC: ICE candidate found:', event.candidate);
-                socket.emit('webrtc-ice-candidate', {
-                    roomId,
-                    sender: currentUsername,
-                    // Determine receiver based on whether it's an outgoing call or accepting an incoming one
-                    receiver: isCaller ? recipientUsername : callState.incomingCallerUsername,
-                    candidate: event.candidate,
-                });
-            } else {
-                console.log('useWebRTC: ICE gathering finished. All candidates sent.');
-            }
-        };
-
-        pc.ontrack = (event) => {
-            console.log('useWebRTC: Remote track received:', event.track);
-            // Make sure there's at least one stream and that remoteVideoRef is available
-            if (remoteVideoRef.current && event.streams && event.streams.length > 0) {
-                // Check if the srcObject is already set to the same stream to avoid re-setting
-                if (remoteVideoRef.current.srcObject !== event.streams[0]) {
-                    remoteVideoRef.current.srcObject = event.streams[0];
-                    setCallState(prev => ({ ...prev, remoteStream: event.streams[0] }));
-                    console.log('useWebRTC: Remote stream attached to remoteVideoRef.current.');
-                } else {
-                    console.log('useWebRTC: Remote stream already attached, skipping.');
-                }
-            } else {
-                console.warn('useWebRTC: Remote video ref or stream not ready when track received.');
-            }
-        };
-
-        pc.onnegotiationneeded = async () => {
-            console.log('useWebRTC: onnegotiationneeded event triggered.');
-            if (isCaller) { // Only the caller creates the initial offer
-                console.log('useWebRTC: Caller: Creating offer...');
-                try {
-                    await pc.setLocalDescription(await pc.createOffer());
-                    console.log('useWebRTC: Caller: Local description (offer) created.');
-                    socket.emit('webrtc-offer', {
-                        roomId,
-                        sender: currentUsername,
-                        receiver: recipientUsername,
-                        offer: pc.localDescription,
-                    });
-                    console.log('useWebRTC: Caller: WebRTC offer sent.');
-                } catch (error) {
-                    console.error('useWebRTC: Caller: Error creating or sending offer:', error);
-                }
-            } else {
-                console.log('useWebRTC: Callee: Skipping offer creation (waiting for remote offer).');
-            }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-            if (peerConnectionRef.current) {
-                console.log('useWebRTC: ICE connection state changed to:', peerConnectionRef.current.iceConnectionState);
-            }
-        };
-
-        pc.onconnectionstatechange = () => {
-            if (peerConnectionRef.current) {
-                console.log('useWebRTC: Peer connection state changed to:', peerConnectionRef.current.connectionState);
-                if (peerConnectionRef.current.connectionState === 'connected') {
-                    console.log('useWebRTC: Peer connection is CONNECTED.');
-                    // Start call duration timer when connection is established
-                    if (!callTimerRef.current) {
-                        callTimerRef.current = setInterval(() => {
-                            setCallState(prev => ({ ...prev, callDuration: prev.callDuration + 1 }));
-                        }, 1000);
-                        console.log('useWebRTC: Call duration timer started.');
-                    }
-                    // Set isActive to true once truly connected
-                    setCallState(prev => ({ ...prev, isActive: true }));
-                } else if (['disconnected', 'failed', 'closed'].includes(peerConnectionRef.current.connectionState)) {
-                    console.warn('useWebRTC: Peer connection disconnected, failed, or closed. Ending call.');
-                    endCall(); // Automatically end call on disconnection/failure
-                }
-            }
-        };
-
-        // Add local stream tracks to peer connection
-        if (callState.localStream) {
-            callState.localStream.getTracks().forEach(track => {
-                pc.addTrack(track, callState.localStream!);
-                console.log(`useWebRTC: Added local ${track.kind} track to peer connection.`);
+    /**
+     * Get user media (camera and microphone)
+     * Optional: Add more specific video constraints for quality.
+     */
+    const getUserMedia = useCallback(async (): Promise<MediaStream | null> => {
+        console.log('getUserMedia: Requesting media devices (video & audio)... [Step 1]');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 640, max: 1280 },  // Try to get 640x480, max 1280x720
+                    height: { ideal: 480, max: 720 },
+                    frameRate: { ideal: 30 }          // Try for 30 frames per second
+                },
+                audio: true
             });
-        } else {
-            console.warn('useWebRTC: No local stream available when creating peer connection.');
+
+            setCallState(prev => ({ ...prev, localStream: stream }));
+
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
+                // Add autoplay and playsInline attributes for mobile compatibility
+                localVideoRef.current.autoplay = true;
+                localVideoRef.current.playsInline = true;
+                localVideoRef.current.muted = true; // Mute local video to prevent echo
+                console.log('getUserMedia: Local stream set on video element. [Step 2]');
+            }
+            console.log('getUserMedia: Media stream successfully obtained. [Step 3]');
+            return stream;
+        } catch (error: any) {
+            console.error('getUserMedia: !!! CRITICAL ERROR accessing media devices:', error);
+            if (error.name) {
+                console.error('getUserMedia: Error Name:', error.name);
+            }
+            if (error.message) {
+                console.error('getUserMedia: Error Message:', error.message);
+            }
+            alert(`Failed to access camera/microphone. Please ensure permissions are granted. Error: ${error.name}`);
+            console.log('getUserMedia: Invoking endCall due to media access error. [Step 4]');
+            endCallRef.current?.(); // Use the ref for immediate cleanup
+            return null;
         }
-
-        return pc;
-    }, [socket, roomId, currentUsername, recipientUsername, callState.localStream, callState.incomingCallerUsername, endCall]);
+    }, [setCallState]);
 
 
-    // --- Call Actions ---
+    /**
+     * Start call duration timer
+     */
+    const startCallTimer = useCallback(() => {
+        console.log('startCallTimer: Starting call duration timer.');
+        if (callTimerRef.current) clearInterval(callTimerRef.current); // Clear any existing timer
+        callTimerRef.current = setInterval(() => {
+            if (callStartTimeRef.current) {
+                const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+                setCallState(prev => ({ ...prev, callDuration: duration }));
+            }
+        }, 1000);
+    }, [setCallState]);
+
+
+    /**
+     * Function to start a video call (initiator)
+     */
     const startCall = useCallback(async () => {
-        console.log('useWebRTC: Initiating call...');
-        if (!recipientUsername) {
-            console.warn('useWebRTC: No recipient to call.');
-            socket.emit('client-error', { type: 'call', message: 'No recipient to call.' });
+        console.log('startCall: Initiating video call sequence.');
+        if (!recipientId) { // Check if recipient is available
+            console.error('startCall: Cannot initiate call, recipient is undefined. Please ensure another user is in the room.');
+            alert('Cannot initiate call. No recipient found in the room. Please wait for another user to join.');
             return;
         }
 
-        // Check current call state before proceeding
+        // Prevent starting a call if one is already active or incoming
         if (callState.isActive || callState.incomingCallOffer) {
-            console.warn('useWebRTC: Already in an active call or has an incoming offer. Cannot start new call.');
-            socket.emit('client-notification', { type: 'warning', title: 'Call in Progress', message: 'You are already in a call or have an incoming call.' });
+            console.warn('startCall: Call already active or incoming call pending. Aborting new call initiation.');
             return;
         }
-
-        resetCallState(); // Ensure state is clean before starting new call
-
-        const localMediaStream = await getMedia();
-        if (!localMediaStream) {
-            console.error('useWebRTC: Failed to get local media, cannot start call.');
-            return;
-        }
-        // localStream is already set in state by getMedia, and attached to ref
-        // setCallState(prev => ({ ...prev, isActive: true, localStream: localMediaStream })); // isActive set by onconnectionstatechange
-
-        const pc = createPeerConnection(true); // true because this is the caller
-        if (!pc) {
-            console.error('useWebRTC: Failed to create peer connection for starting call.');
-            return;
-        }
-
-        // Tracks are added inside createPeerConnection using callState.localStream
-        console.log('useWebRTC: Call initiation process complete. Waiting for offer/answer.');
-    }, [recipientUsername, callState.isActive, callState.incomingCallOffer, resetCallState, getMedia, createPeerConnection, socket]);
-
-
-    const endCall = useCallback(() => {
-        console.log('useWebRTC: Ending call...');
-        // Notify the other participant if there was one involved
-        const targetReceiver = recipientUsername || callState.incomingCallerUsername;
-        if (targetReceiver) {
-            socket.emit('webrtc-end-call', {
-                roomId,
-                sender: currentUsername,
-                receiver: targetReceiver,
-            });
-            console.log(`useWebRTC: End call signal sent to ${targetReceiver}.`);
-        } else {
-            console.log('useWebRTC: No active recipient to send end-call signal to.');
-        }
-
-        resetCallState(); // Clean up all resources
-        console.log('useWebRTC: Call ended and state reset.');
-    }, [socket, roomId, currentUsername, recipientUsername, callState.incomingCallerUsername, resetCallState]);
-
-
-    const acceptIncomingCall = useCallback(async () => {
-        console.log('useWebRTC: Accepting incoming call...');
-        if (!callState.incomingCallOffer || !callState.incomingCallerUsername) {
-            console.error('useWebRTC: No incoming call offer or caller username to accept.');
-            socket.emit('client-error', { type: 'call-accept', message: 'No incoming call offer to accept.' });
-            return;
-        }
-
-        resetCallState(); // Ensure state is clean before accepting
-
-        const localMediaStream = await getMedia();
-        if (!localMediaStream) {
-            console.error('useWebRTC: Failed to get local media, cannot accept call.');
-            return;
-        }
-        // localStream is already set in state by getMedia, and attached to ref
-
-        const pc = createPeerConnection(false); // false because this is the callee
-        if (!pc) {
-            console.error('useWebRTC: Failed to create peer connection for accepting call.');
-            return;
-        }
-
-        // Tracks are added inside createPeerConnection using callState.localStream
 
         try {
-            console.log('useWebRTC: Callee: Setting remote description (offer).');
-            await pc.setRemoteDescription(new RTCSessionDescription(callState.incomingCallOffer));
-            console.log('useWebRTC: Callee: Remote description (offer) set.');
+            const localStream = await getUserMedia();
+            if (!localStream) {
+                console.error('startCall: No local stream obtained. Aborting call.');
+                return;
+            }
+            console.log('startCall: Local stream obtained successfully.');
 
-            console.log('useWebRTC: Callee: Creating answer...');
-            await pc.setLocalDescription(await pc.createAnswer());
-            console.log('useWebRTC: Callee: Local description (answer) created.');
+            const peerConnection = initializePeerConnection();
+            if (!peerConnection) {
+                console.error('startCall: Failed to initialize peer connection. Aborting call.');
+                endCallRef.current?.();
+                return;
+            }
+            console.log('startCall: Peer connection initialized.');
 
-            socket.emit('webrtc-answer', {
-                roomId,
-                sender: currentUsername,
-                receiver: callState.incomingCallerUsername,
-                answer: pc.localDescription,
+            // Add local stream to peer connection
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+                console.log(`startCall: Added local track: ${track.kind}`);
             });
-            console.log('useWebRTC: Callee: WebRTC answer sent.');
 
+            // Create and send offer
+            console.log('startCall: Creating offer...');
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            console.log('startCall: Local description set (offer).');
+
+            if (socket?.emit) {
+                console.log('startCall: Emitting WebRTC offer signal to', recipientId);
+                socket.emit('webrtc-signal', {
+                    type: 'offer',
+                    data: offer,
+                    roomId,
+                    sender: username,
+                    recipient: recipientId
+                });
+            }
+
+            // Update call state to active
+            setCallState(prev => ({
+                ...prev,
+                isActive: true,
+                localStream
+            }));
+            console.log('startCall: Call state updated to isActive: true.');
+
+            callStartTimeRef.current = Date.now();
+            startCallTimer();
+            console.log('startCall: Call timer started.');
+
+            console.log('startCall: Video call sequence complete.');
         } catch (error) {
-            console.error('useWebRTC: Error accepting call:', error);
-            socket.emit('client-error', { type: 'call-accept', message: `Error accepting call: ${error instanceof Error ? error.message : String(error)}` });
-            endCall(); // End call process on error
+            console.error('startCall: Uncaught error during call initiation:', error);
+            endCallRef.current?.();
         }
-    }, [socket, currentUsername, callState.incomingCallOffer, callState.incomingCallerUsername, resetCallState, getMedia, createPeerConnection, endCall]);
+    }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState, recipientId, callState.isActive, callState.incomingCallOffer]);
 
 
-    const rejectIncomingCall = useCallback(() => {
-        console.log('useWebRTC: Rejecting incoming call...');
-        if (callState.incomingCallerUsername && callState.incomingCallOffer) {
-            socket.emit('webrtc-reject-call', {
-                roomId,
-                sender: currentUsername,
-                receiver: callState.incomingCallerUsername,
+    /**
+     * Function to accept an incoming call (receiver action triggered by user click)
+     */
+    const acceptIncomingCall = useCallback(async () => {
+        // Ensure there is a pending incoming call to accept
+        if (!callState.incomingCallOffer || !callState.incomingCallerUsername) {
+            console.warn('acceptIncomingCall: No pending incoming call to accept.');
+            return;
+        }
+
+        console.log(`acceptIncomingCall: User accepting incoming call from ${callState.incomingCallerUsername}.`);
+        const offerToAnswer = callState.incomingCallOffer;
+        const callerUsername = callState.incomingCallerUsername;
+
+        // Immediately clear incoming call state to prevent re-acceptance or UI issues
+        setCallState(prev => ({
+            ...prev,
+            incomingCallOffer: null,
+            incomingCallerUsername: null,
+        }));
+
+        try {
+            const localStream = await getUserMedia();
+            if (!localStream) {
+                console.error('acceptIncomingCall: No local stream obtained. Aborting answer.');
+                return;
+            }
+            console.log('acceptIncomingCall: Local stream obtained successfully for answer.');
+
+            const peerConnection = initializePeerConnection();
+            if (!peerConnection) {
+                console.error('acceptIncomingCall: Failed to initialize peer connection for answer. Aborting.');
+                endCallRef.current?.();
+                return;
+            }
+            console.log('acceptIncomingCall: Peer connection initialized for answer.');
+
+            // Add local stream to peer connection
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+                console.log(`acceptIncomingCall: Added local track for answer: ${track.kind}`);
             });
-            console.log(`useWebRTC: Rejected call from ${callState.incomingCallerUsername}.`);
-        } else {
-            console.warn('useWebRTC: No incoming call to reject or caller unknown.');
+
+            // Set remote description (offer) and create answer
+            console.log('acceptIncomingCall: Setting remote description (offer) and creating answer...');
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offerToAnswer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            console.log('acceptIncomingCall: Local description set (answer).');
+
+            if (socket?.emit) {
+                console.log('acceptIncomingCall: Emitting WebRTC answer signal to', callerUsername);
+                socket.emit('webrtc-signal', {
+                    type: 'answer',
+                    data: answer,
+                    roomId,
+                    sender: username,
+                    recipient: callerUsername // Send answer back to the actual caller
+                });
+            }
+
+            // Update call state to active
+            setCallState(prev => ({
+                ...prev,
+                isActive: true,
+                localStream
+            }));
+            console.log('acceptIncomingCall: Call state updated to isActive: true.');
+
+            callStartTimeRef.current = Date.now();
+            startCallTimer();
+            console.log('acceptIncomingCall: Call timer started.');
+
+            console.log('acceptIncomingCall: Call answer sequence complete.');
+        } catch (error) {
+            console.error('acceptIncomingCall: Uncaught error during call answering:', error);
+            endCallRef.current?.();
         }
-        resetCallState();
-    }, [socket, roomId, currentUsername, callState.incomingCallerUsername, callState.incomingCallOffer, resetCallState]);
+    }, [callState.incomingCallOffer, callState.incomingCallerUsername, getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState]);
 
 
+    /**
+     * Function to reject an incoming call (receiver action triggered by user click)
+     */
+    const rejectIncomingCall = useCallback(() => {
+        if (callState.incomingCallerUsername) {
+            console.log(`rejectIncomingCall: User rejected incoming call from ${callState.incomingCallerUsername}.`);
+            // Send a signal to the caller that the call was rejected
+            if (socket?.emit) {
+                socket.emit('webrtc-signal', {
+                    type: 'call-rejected', // Custom signal type for rejection
+                    data: {},
+                    roomId,
+                    sender: username,
+                    recipient: callState.incomingCallerUsername,
+                });
+            }
+        }
+        // Clear incoming call state regardless of whether a signal was sent
+        setCallState(prev => ({
+            ...prev,
+            incomingCallOffer: null,
+            incomingCallerUsername: null,
+        }));
+        console.log('rejectIncomingCall: Incoming call state cleared.');
+    }, [callState.incomingCallerUsername, socket, roomId, username, setCallState]);
+
+
+    /**
+     * Toggle local video
+     */
     const toggleVideo = useCallback(() => {
-        console.log('useWebRTC: Toggling local video.');
         if (callState.localStream) {
             const videoTrack = callState.localStream.getVideoTracks()[0];
             if (videoTrack) {
                 videoTrack.enabled = !videoTrack.enabled;
-                setCallState(prev => ({ ...prev, isLocalVideoEnabled: videoTrack.enabled }));
-                console.log(`useWebRTC: Video track enabled: ${videoTrack.enabled}`);
+                setCallState(prev => ({
+                    ...prev,
+                    isLocalVideoEnabled: videoTrack.enabled
+                }));
+                console.log(`toggleVideo: Local video enabled: ${videoTrack.enabled}`);
             } else {
-                console.warn('useWebRTC: No video track found in local stream.');
+                console.warn('toggleVideo: No video track found in local stream.');
             }
         } else {
-            console.warn('useWebRTC: No local stream available to toggle video.');
+            console.warn('toggleVideo: No local stream to toggle video.');
         }
-    }, [callState.localStream]);
+    }, [callState.localStream, setCallState]);
 
-
+    /**
+     * Toggle local audio
+     */
     const toggleAudio = useCallback(() => {
-        console.log('useWebRTC: Toggling local audio.');
         if (callState.localStream) {
             const audioTrack = callState.localStream.getAudioTracks()[0];
             if (audioTrack) {
                 audioTrack.enabled = !audioTrack.enabled;
-                setCallState(prev => ({ ...prev, isLocalAudioEnabled: audioTrack.enabled }));
-                console.log(`useWebRTC: Audio track enabled: ${audioTrack.enabled}`);
+                setCallState(prev => ({
+                    ...prev,
+                    isLocalAudioEnabled: audioTrack.enabled
+                }));
+                console.log(`toggleAudio: Local audio enabled: ${audioTrack.enabled}`);
             } else {
-                console.warn('useWebRTC: No audio track found in local stream.');
+                console.warn('toggleAudio: No audio track found in local stream.');
             }
         } else {
-            console.warn('useWebRTC: No local stream available to toggle audio.');
+            console.warn('toggleAudio: No local stream to toggle audio.');
         }
-    }, [callState.localStream]);
+    }, [callState.localStream, setCallState]);
 
 
-    // --- Socket Event Listeners for WebRTC Signaling ---
+    /**
+     * Format call duration for display
+     */
+    const formatCallDuration = useCallback((seconds: number): string => {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }, []);
+
+    /**
+     * Handle WebRTC signaling messages
+     */
     useEffect(() => {
-        if (!socket.on) {
-            console.warn('useWebRTC: Socket instance not ready for event listeners.');
+        console.log('useEffect: Setting up WebRTC signal listener.');
+        if (!socket?.on) {
+            console.warn('useEffect: Socket is not ready to set up WebRTC signal listener.');
             return;
         }
 
-        console.log('useWebRTC: Setting up WebRTC socket listeners.');
+        const handleWebRTCSignal = async (signal: WebRTCSignal) => {
+            console.log(`handleWebRTCSignal: Received signal type: ${signal.type} from ${signal.sender}`);
+            console.log(`handleWebRTCSignal DEBUG: Current client username: ${username}`);
+            console.log(`handleWebRTCSignal DEBUG: Current client roomId: ${roomId}`);
+            console.log(`handleWebRTCSignal DEBUG: Signal sender: ${signal.sender}`);
+            console.log(`handleWebRTCSignal DEBUG: Signal roomId: ${signal.roomId}`);
+            console.log(`handleWebRTCSignal DEBUG: Signal recipient: ${signal.recipient}`);
 
-        const unsubscribeOffer = socket.on('webrtc-offer', async (data: { sender: string; offer: RTCSessionDescription }) => {
-            console.log('useWebRTC: Received WebRTC offer:', data);
-            // Check if already in a call or already have an incoming offer
-            if (callState.isActive) {
-                console.warn(`useWebRTC: Already in an active call. Rejecting offer from ${data.sender}.`);
-                socket.emit('webrtc-reject-call', {
-                    roomId,
-                    sender: currentUsername,
-                    receiver: data.sender, // Reject the offer
-                    reason: 'already_active_call'
-                });
+
+            // Ensure signal is for this room and not from self
+            if (signal.roomId !== roomId) {
+                console.log(`handleWebRTCSignal: Signal ignored (roomId mismatch: signal.roomId='${signal.roomId}', client.roomId='${roomId}').`);
                 return;
             }
-             if (callState.incomingCallOffer) {
-                console.warn(`useWebRTC: Already has a pending incoming offer. Rejecting offer from ${data.sender}.`);
-                socket.emit('webrtc-reject-call', {
-                    roomId,
-                    sender: currentUsername,
-                    receiver: data.sender, // Reject the offer
-                    reason: 'already_pending_offer'
-                });
+            if (signal.sender === username) {
+                console.log(`handleWebRTCSignal: Signal ignored (from self: signal.sender='${signal.sender}', client.username='${username}').`);
+                return;
+            }
+            // CRITICAL CHECK: If the signal has a 'recipient' field, ensure it's for *this* client.
+            // This prevents clients from processing signals not intended for them in multi-user rooms.
+            if (signal.recipient && signal.recipient !== username) {
+                console.log(`handleWebRTCSignal: Signal ignored (intended for '${signal.recipient}', not '${username}').`);
                 return;
             }
 
 
-            setCallState(prev => ({
-                ...prev,
-                incomingCallOffer: new RTCSessionDescription(data.offer),
-                incomingCallerUsername: data.sender,
-            }));
-            console.log('useWebRTC: Incoming call offer stored. Ready to accept/reject.');
-        });
+            try {
+                switch (signal.type) {
+                    case 'offer':
+                        console.log('handleWebRTCSignal: Received offer. Setting incoming call state.');
+                        // If a call is already active, reject new offers
+                        if (callState.isActive) {
+                            console.warn('handleWebRTCSignal: Call already active, rejecting new offer.');
+                            socket.emit('webrtc-signal', {
+                                type: 'call-rejected',
+                                data: { reason: 'busy' },
+                                roomId,
+                                sender: username,
+                                recipient: signal.sender,
+                            });
+                            return;
+                        }
+                        // Set incoming call state instead of immediately answering
+                        setCallState(prev => ({
+                            ...prev,
+                            incomingCallOffer: signal.data,
+                            incomingCallerUsername: signal.sender,
+                        }));
+                        break;
 
-        const unsubscribeAnswer = socket.on('webrtc-answer', async (data: { sender: string; answer: RTCSessionDescription }) => {
-            console.log('useWebRTC: Received WebRTC answer:', data);
-            if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'stable') {
-                try {
-                    await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    console.log('useWebRTC: Remote description (answer) set successfully.');
-                } catch (error) {
-                    console.error('useWebRTC: Error setting remote description (answer):', error);
+                    case 'answer':
+                        console.log('handleWebRTCSignal: Processing answer.');
+                        if (peerConnectionRef.current && peerConnectionRef.current.signalingState !== 'closed') { // Check signaling state
+                            await peerConnectionRef.current.setRemoteDescription(
+                                new RTCSessionDescription(signal.data)
+                            );
+                            console.log('handleWebRTCSignal: Remote description set (answer).');
+                        } else {
+                            console.warn('handleWebRTCSignal: Peer connection not initialized or closed when receiving answer.');
+                        }
+                        break;
+
+                    case 'ice-candidate':
+                        console.log('handleWebRTCSignal: Processing ICE candidate.');
+                        if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription && peerConnectionRef.current.signalingState !== 'closed') {
+                            await peerConnectionRef.current.addIceCandidate(
+                                new RTCIceCandidate(signal.data)
+                            );
+                            console.log('handleWebRTCSignal: ICE candidate added.');
+                        } else {
+                            console.warn('handleWebRTCSignal: Peer connection not initialized, remote description not set, or closed when receiving ICE candidate.');
+                        }
+                        break;
+
+                    case 'call-end':
+                        console.log(`handleWebRTCSignal: Received call-end signal from ${signal.sender}. Ending call locally.`);
+                        endCallRef.current?.(); // Use the ref to trigger cleanup
+                        break;
+
+                    case 'call-rejected': // New case for call rejection
+                        console.log(`handleWebRTCSignal: Received call-rejected signal from ${signal.sender}.`);
+                        // If we initiated a call to this sender, clear the pending state
+                        if (recipientId === signal.sender) { // Check if the rejection is for our outgoing call
+                            alert(`${signal.sender} rejected your call.`);
+                            endCallRef.current?.(); // End the call sequence from our side
+                        } else if (callState.incomingCallerUsername === signal.sender) { // If it was an incoming call we ignored/didn't pick up
+                            setCallState(prev => ({
+                                ...prev,
+                                incomingCallOffer: null,
+                                incomingCallerUsername: null,
+                            }));
+                        }
+                        break;
+
+                    default:
+                        console.warn(`handleWebRTCSignal: Unknown signal type: ${signal.type}`);
                 }
-            } else {
-                console.warn('useWebRTC: Peer connection not ready to set remote description (answer) or already stable.');
+            } catch (error) {
+                console.error('handleWebRTCSignal: Error handling WebRTC signal:', error);
             }
-        });
-
-        const unsubscribeIceCandidate = socket.on('webrtc-ice-candidate', async (data: { sender: string; candidate: RTCIceCandidate }) => {
-            console.log('useWebRTC: Received ICE candidate:', data);
-            if (peerConnectionRef.current && data.candidate) { // Ensure candidate is not null
-                try {
-                    await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-                    console.log('useWebRTC: ICE candidate added.');
-                } catch (error) {
-                    console.error('useWebRTC: Error adding ICE candidate:', error);
-                }
-            } else {
-                console.warn('useWebRTC: Peer connection not initialized or candidate is null, cannot add ICE candidate.');
-            }
-        });
-
-        const unsubscribeEndCall = socket.on('webrtc-end-call', (data: { sender: string }) => {
-            console.log(`useWebRTC: Received end call signal from ${data.sender}.`);
-            // Only show notification if it's the other person ending the call
-            if (data.sender !== currentUsername) {
-                socket.emit('client-notification', { type: 'info', title: 'Call Ended', message: `${data.sender} has ended the call.` });
-            }
-            resetCallState(); // This will also handle local cleanup
-        });
-
-        const unsubscribeRejectCall = socket.on('webrtc-reject-call', (data: { sender: string }) => {
-            console.log(`useWebRTC: Received reject call signal from ${data.sender}.`);
-            // If the call was rejected by the recipient
-            if (data.sender === (recipientUsername || callState.incomingCallerUsername)) {
-                if (!callState.isActive) { // Only show notification if we are the caller and call isn't active yet
-                    socket.emit('client-notification', { type: 'info', title: 'Call Rejected', message: `${data.sender} declined your call.` });
-                }
-            }
-            resetCallState(); // Reset state for the caller (or just clear incoming offer for callee if they rejected)
-        });
-
-        return () => {
-            console.log('useWebRTC: Cleaning up WebRTC socket listeners.');
-            unsubscribeOffer();
-            unsubscribeAnswer();
-            unsubscribeIceCandidate();
-            unsubscribeEndCall();
-            unsubscribeRejectCall();
         };
-    }, [socket, roomId, currentUsername, recipientUsername, callState.isActive, callState.incomingCallOffer, resetCallState]);
 
+        // Attach the listener
+        socket.on('webrtc-signal', handleWebRTCSignal);
+        console.log('useEffect: WebRTC signal listener attached.');
 
-    // Cleanup on unmount
+        // Cleanup function - CRITICAL FIX for TypeError: e.off is not a function
+        return () => {
+            if (socket && typeof socket.off === 'function') {
+                socket.off('webrtc-signal', handleWebRTCSignal);
+                console.log('useEffect: Cleaned up WebRTC signal listener.');
+            } else {
+                console.warn('useEffect cleanup: Socket is null or does not have .off method. Skipping listener cleanup.');
+            }
+        };
+    }, [socket, roomId, username, recipientId, setCallState, callState.isActive, callState.incomingCallerUsername, endCallRef]); // Add setCallState to deps
+
+    /**
+     * Cleanup on component unmount
+     */
     useEffect(() => {
         return () => {
-            console.log('useWebRTC: Hook unmounting. Ensuring full cleanup.');
-            resetCallState();
+            console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
+            endCallRef.current?.(); // Use the ref to ensure cleanup
         };
-    }, [resetCallState]); // Depends on resetCallState
+    }, []);
 
-    // Utility to format call duration
-    const formatCallDuration = (seconds: number): string => {
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = seconds % 60;
-        return [h, m, s]
-            .map(v => v < 10 ? '0' + v : v)
-            .filter((v, i) => v !== '00' || i > 0 || h > 0) // Hide hours if zero, unless minutes/seconds are also zero
-            .join(':');
-    };
 
     return {
-        callState,
+        callState,                 // Now includes incomingCallOffer and incomingCallerUsername
         localVideoRef,
         remoteVideoRef,
         startCall,
         endCall,
-        acceptIncomingCall,
-        rejectIncomingCall,
+        acceptIncomingCall,        // New function to accept call
+        rejectIncomingCall,        // New function to reject call
         toggleVideo,
         toggleAudio,
-        formatCallDuration,
+        formatCallDuration
     };
-};
+}
