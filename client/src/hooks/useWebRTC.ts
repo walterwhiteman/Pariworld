@@ -8,7 +8,7 @@ import { VideoCallState, WebRTCSignal } from '@/types/chat';
  * Implements peer-to-peer video communication for the chat application
  */
 export function useWebRTC(socket: any, roomId: string, username: string) {
-  // 1. State and Ref declarations (these must always come first)
+  // 1. State and Ref declarations
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
     isLocalVideoEnabled: true,
@@ -24,6 +24,10 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
   const callStartTimeRef = useRef<number | null>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // New ref to hold the latest endCall function
+  const endCallRef = useRef<(() => void) | null>(null);
+
+
   // 2. Constants like rtcConfig
   const rtcConfig: RTCConfiguration = {
     iceServers: [
@@ -32,10 +36,12 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     ]
   };
 
-  // 3. Define endCall as a *plain function* (TEMPORARY DIAGNOSTIC STEP for ReferenceError)
-  // This means it will be re-created on every render, which is generally not ideal,
-  // but it avoids the lexical initialization issue causing the blank page.
-  const endCall = () => {
+  /**
+   * Defines the endCall function as a useCallback to stabilize its reference.
+   * Dependencies are carefully chosen to prevent unnecessary re-creations,
+   * especially to avoid circular dependencies that cause loops.
+   */
+  const endCall = useCallback(() => {
     console.log('endCall: Ending video call sequence...');
 
     // Stop call timer
@@ -53,6 +59,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     }
 
     // Stop local stream tracks
+    // Access localStream directly from the state for safety
     if (callState.localStream) {
       callState.localStream.getTracks().forEach(track => {
         track.stop();
@@ -72,6 +79,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     }
 
     // Notify other peer (only if call was active to avoid sending spurious end signals)
+    // Access isActive directly from the state for safety
     if (socket?.emit && callState.isActive) {
       console.log('endCall: Emitting call-end signal to other peer.');
       socket.emit('webrtc-signal', {
@@ -82,7 +90,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       });
     }
 
-    // Reset call state
+    // Reset call state - this WILL cause a re-render
     setCallState({
       isActive: false,
       isLocalVideoEnabled: true,
@@ -95,7 +103,23 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
 
     callStartTimeRef.current = null;
     console.log('endCall: Video call sequence ended.');
-  }; // NO useCallback() here for now!
+  }, [
+    socket,           // Stable prop from ChatPage
+    roomId,           // Stable prop from ChatPage
+    username,         // Stable prop from ChatPage
+    setCallState,     // Stable state setter
+    // Crucially, we exclude callState.localStream and callState.isActive from dependencies here
+    // because `endCall` *itself* changes them. Including them would create a loop.
+    // We access their *current* value directly within the function.
+    callState.localStream, // Include as dependency because it's read
+    callState.isActive // Include as dependency because it's read
+  ]);
+
+  // Update the ref to the latest `endCall` function whenever `endCall` is re-created.
+  // This effect runs whenever `endCall`'s dependencies change.
+  useEffect(() => {
+    endCallRef.current = endCall;
+  }, [endCall]);
 
 
   /**
@@ -141,16 +165,19 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
         if (peerConnection.connectionState === 'disconnected' || 
             peerConnection.connectionState === 'failed') {
           console.log('onconnectionstatechange: Peer connection disconnected or failed, calling endCall.');
-          endCall(); // Call to the plain endCall function
+          // Call endCall using the ref to get the latest stable function
+          endCallRef.current?.(); 
         }
       };
 
       return peerConnection;
     } catch (error) {
       console.error('initializePeerConnection: Error initializing peer connection:', error);
+      // Call endCall using the ref
+      endCallRef.current?.(); 
       return null;
     }
-  }, [socket, roomId, username]); // Removed endCall from dependencies
+  }, [socket, roomId, username]);
 
 
   /**
@@ -174,7 +201,6 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       return stream;
     } catch (error: any) { // Explicitly type error as 'any' for full access
       console.error('getUserMedia: !!! CRITICAL ERROR accessing media devices:', error); // More explicit error log
-      // Check for specific error names if available
       if (error.name) {
           console.error('getUserMedia: Error Name:', error.name);
       }
@@ -182,10 +208,11 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
           console.error('getUserMedia: Error Message:', error.message);
       }
       console.log('getUserMedia: Invoking endCall due to media access error. [Step 4]'); // NEW LOG BEFORE ENDCALL
-      endCall(); // Call to the plain endCall function
+      // Call endCall using the ref
+      endCallRef.current?.(); 
       return null;
     }
-  }, []); // Removed endCall from dependencies
+  }, [setCallState]);
 
 
   /**
@@ -199,7 +226,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
         setCallState(prev => ({ ...prev, callDuration: duration }));
       }
     }, 1000);
-  }, []);
+  }, [setCallState]); // setCallState is a stable setter, so this useCallback is stable
 
 
   /**
@@ -219,7 +246,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       const peerConnection = initializePeerConnection();
       if (!peerConnection) {
         console.error('startCall: Failed to initialize peer connection. Aborting call.');
-        endCall(); // Call to the plain endCall function
+        endCallRef.current?.(); // Call endCall using the ref
         return;
       }
       console.log('startCall: Peer connection initialized.');
@@ -262,9 +289,9 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.log('startCall: Video call sequence complete.');
     } catch (error) {
       console.error('startCall: Uncaught error during call initiation:', error);
-      endCall(); // Call to the plain endCall function
+      endCallRef.current?.(); // Call endCall using the ref
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer]); // Removed endCall from dependencies
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState]);
 
 
   /**
@@ -283,7 +310,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       const peerConnection = initializePeerConnection();
       if (!peerConnection) {
         console.error('answerCall: Failed to initialize peer connection for answer. Aborting.');
-        endCall(); // Call to the plain endCall function
+        endCallRef.current?.(); // Call endCall using the ref
         return;
       }
       console.log('answerCall: Peer connection initialized for answer.');
@@ -327,9 +354,9 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       console.log('answerCall: Call answer sequence complete.');
     } catch (error) {
       console.error('answerCall: Uncaught error during call answering:', error);
-      endCall(); // Call to the plain endCall function
+      endCallRef.current?.(); // Call endCall using the ref
     }
-  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer]); // Removed endCall from dependencies
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState]);
 
 
   /**
@@ -351,7 +378,8 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     } else {
       console.warn('toggleVideo: No local stream to toggle video.');
     }
-  }, [callState.localStream]);
+  }, [callState.localStream, setCallState]); // Add setCallState to dependencies
+
 
   /**
    * Toggle local audio
@@ -372,7 +400,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     } else {
       console.warn('toggleAudio: No local stream to toggle audio.');
     }
-  }, [callState.localStream]);
+  }, [callState.localStream, setCallState]); // Add setCallState to dependencies
 
 
   /**
@@ -436,7 +464,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
             
           case 'call-end':
             console.log('handleWebRTCSignal: Received call-end signal. Ending call locally.');
-            endCall(); // Call to the plain endCall function
+            endCallRef.current?.(); // Call endCall using the ref
             break;
 
           default:
@@ -462,20 +490,19 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       }
     };
   }, [socket, roomId, username, answerCall]); // Dependencies for this useEffect
-                                             // endCall is intentionally not here as it's a plain function now
-
-
+    
   /**
    * Cleanup on component unmount
+   * This useEffect uses an empty dependency array to ensure its cleanup runs only once on unmount.
+   * It accesses the latest `endCall` via the `endCallRef`.
    */
   useEffect(() => {
-    // This effect's cleanup runs when the component unmounts.
-    // It also runs before the effect re-runs if dependencies change.
     return () => {
       console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
-      endCall(); // This needs to call the latest endCall function
+      // Use the ref to call the latest endCall function when the component truly unmounts
+      endCallRef.current?.(); 
     };
-  }, [endCall]); // endCall *must* be in this dependency array for the cleanup to be correct
+  }, []); // EMPTY dependency array! This effect runs its setup once on mount, and cleanup once on unmount.
 
 
   return {
@@ -483,7 +510,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     localVideoRef,
     remoteVideoRef,
     startCall,
-    endCall, // Expose the plain function
+    endCall, // Expose the useCallback function
     toggleVideo,
     toggleAudio,
     formatCallDuration
