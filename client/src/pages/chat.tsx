@@ -1,435 +1,528 @@
-// src/pages/chat.tsx
+// src/hooks/useWebRTC.ts
 
-import { useState, useCallback, useEffect } from 'react';
-import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
-import { ChatHeader } from '@/components/chat/ChatHeader';
-import { ChatMessages } from '@/components/chat/ChatMessages';
-import { MessageInput } from '@/components/chat/MessageInput';
-import { VideoCallModal } from '@/components/chat/VideoCallModal';
-import { NotificationToast } from '@/components/chat/NotificationToast';
-import { ImageViewerModal } from '@/components/chat/ImageViewerModal';
-import { useSocket } from '@/hooks/useSocket';
-import { useWebRTC } from '@/hooks/useWebRTC'; // Make sure this path is correct
-
-import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { VideoCallState, WebRTCSignal } from '@/types/chat';
 
 /**
- * Main chat page component that orchestrates the entire chat application
- * Manages room state, messaging, notifications, and video calling
+ * Custom hook for WebRTC video calling functionality
+ * Implements peer-to-peer video communication for the chat application
  */
-export default function ChatPage() {
-  // Add these console logs for debugging component lifecycle
-  console.log('ChatPage: Rendering component.');
-
-  // Room and user state
-  const [roomState, setRoomState] = useState<RoomState>({
-    roomId: '',
-    username: '',
-    isConnected: false,
-    participants: [],
-    messages: []
+export function useWebRTC(socket: any, roomId: string, username: string, recipientId: string | undefined) { // <-- ADDED recipientId
+  // 1. State and Ref declarations
+  const [callState, setCallState] = useState<VideoCallState>({
+    isActive: false,
+    isLocalVideoEnabled: true,
+    isLocalAudioEnabled: true,
+    localStream: null,
+    remoteStream: null,
+    callDuration: 0
   });
 
-  // UI state
-  const [isRoomModalOpen, setIsRoomModalOpen] = useState(true);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [typingUser, setTypingUser] = useState<string | undefined>();
-  const [notifications, setNotifications] = useState<NotificationData[]>([]);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const callStartTimeRef = useRef<number | null>(null);
+  const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Image Viewer Modal state
-  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
-  const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
+  // Using a ref to hold the current `endCall` function to avoid stale closures
+  // when `endCall` is called from inside `useEffect` or `onconnectionstatechange`.
+  const endCallRef = useRef<(() => void) | null>(null);
 
-  // Hooks
-  const socket = useSocket();
 
-  // Determine the recipient for a 1-on-1 call
-  // This assumes a 1-on-1 chat context where the "other" user is the recipient.
-  // If there are more than 2 participants, this logic would need to be expanded
-  // (e.g., allow selecting a user from a list).
-  const recipientUsername = roomState.participants.find(
-    (p) => p !== roomState.username
-  );
+  // 2. Constants like rtcConfig
+  const rtcConfig: RTCConfiguration = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
 
-  // Pass recipientUsername to useWebRTC hook
-  const webRTC = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername);
+  /**
+   * Defines the endCall function as a useCallback to stabilize its reference.
+   * Dependencies are carefully chosen to prevent unnecessary re-creations,
+   * especially to avoid circular dependencies that cause loops.
+   */
+  const endCall = useCallback(() => {
+    console.log('endCall: Ending video call sequence...');
 
-  // Add this useEffect to track ChatPage's mount/unmount
+    // Stop call timer
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+      console.log('endCall: Call timer cleared.');
+    }
+
+    // Close peer connection
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+      console.log('endCall: Peer connection closed.');
+    }
+
+    // Stop local stream tracks
+    if (callState.localStream) {
+      callState.localStream.getTracks().forEach(track => {
+        track.stop();
+        console.log(`endCall: Stopped local stream track: ${track.kind}`);
+      });
+      console.log('endCall: Local stream tracks stopped.');
+    }
+
+    // Clear video elements srcObject
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+      console.log('endCall: Local video ref srcObject cleared.');
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+      console.log('endCall: Remote video ref srcObject cleared.');
+    }
+
+    // Notify other peer (only if call was active to avoid sending spurious end signals)
+    if (socket?.emit && callState.isActive && recipientId) { // Ensure recipientId exists before sending
+      console.log('endCall: Emitting call-end signal to other peer.');
+      socket.emit('webrtc-signal', {
+        type: 'call-end',
+        data: {},
+        roomId,
+        sender: username,
+        recipient: recipientId // <-- ADDED: Include recipient in call-end signal
+      });
+    } else {
+        console.warn('endCall: Not emitting call-end signal (socket not ready, call not active, or no recipientId).');
+    }
+
+    // Reset call state - this WILL cause a re-render
+    setCallState({
+      isActive: false,
+      isLocalVideoEnabled: true,
+      isLocalAudioEnabled: true,
+      localStream: null,
+      remoteStream: null,
+      callDuration: 0
+    });
+    console.log('endCall: Call state reset.');
+
+    callStartTimeRef.current = null;
+    console.log('endCall: Video call sequence ended.');
+  }, [
+    socket,
+    roomId,
+    username,
+    setCallState,
+    callState.localStream,
+    callState.isActive,
+    recipientId // <-- ADDED: recipientId as dependency
+  ]);
+
+  // Update the ref to the latest `endCall` function whenever `endCall` is re-created.
   useEffect(() => {
-      console.log('ChatPage: Component mounted.');
-      return () => {
-          console.log('ChatPage: Component unmounted.');
+    endCallRef.current = endCall;
+  }, [endCall]);
+
+
+  /**
+   * Initialize WebRTC peer connection
+   */
+  const initializePeerConnection = useCallback(() => {
+    console.log('initializePeerConnection: Attempting to create RTCPeerConnection...');
+    try {
+      const peerConnection = new RTCPeerConnection(rtcConfig);
+      peerConnectionRef.current = peerConnection;
+      console.log('initializePeerConnection: RTCPeerConnection created.');
+
+      // Handle ICE candidates
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate && socket?.emit && recipientId) { // Ensure recipientId exists
+          console.log('onicecandidate: Sending ICE candidate.');
+          socket.emit('webrtc-signal', {
+            type: 'ice-candidate',
+            data: event.candidate,
+            roomId,
+            sender: username,
+            recipient: recipientId // <-- ADDED: Include recipient in ICE candidate
+          });
+        } else {
+          console.log('onicecandidate: No more ICE candidates, event.candidate is null, or socket/recipientId not ready.');
+        }
       };
+
+      // Handle remote stream
+      peerConnection.ontrack = (event) => {
+        console.log('ontrack: Received remote stream/track.');
+        const [remoteStream] = event.streams;
+        setCallState(prev => ({ ...prev, remoteStream }));
+        
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          console.log('ontrack: Remote stream set on video element.');
+        }
+      };
+
+      // Handle connection state changes
+      peerConnection.onconnectionstatechange = () => {
+        console.log('onconnectionstatechange: Connection state:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'disconnected' ||
+            peerConnection.connectionState === 'failed') {
+          console.log('onconnectionstatechange: Peer connection disconnected or failed, calling endCall via ref.');
+          endCallRef.current?.(); // Use the ref
+        } else if (peerConnection.connectionState === 'connected') {
+            console.log('onconnectionstatechange: Peer connection established!');
+        }
+      };
+
+      return peerConnection;
+    } catch (error) {
+      console.error('initializePeerConnection: Error initializing peer connection:', error);
+      endCallRef.current?.(); // Use the ref
+      return null;
+    }
+  }, [socket, roomId, username, recipientId]); // <-- ADDED: recipientId as dependency
+
+
+  /**
+   * Get user media (camera and microphone)
+   */
+  const getUserMedia = useCallback(async (): Promise<MediaStream | null> => {
+    console.log('getUserMedia: Requesting media devices (video & audio)... [Step 1]');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      
+      setCallState(prev => ({ ...prev, localStream: stream }));
+      
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        console.log('getUserMedia: Local stream set on video element. [Step 2]');
+      }
+      console.log('getUserMedia: Media stream successfully obtained. [Step 3]');
+      return stream;
+    } catch (error: any) {
+      console.error('getUserMedia: !!! CRITICAL ERROR accessing media devices:', error);
+      if (error.name) {
+          console.error('getUserMedia: Error Name:', error.name);
+      }
+      if (error.message) {
+          console.error('getUserMedia: Error Message:', error.message);
+      }
+      console.log('getUserMedia: Invoking endCall due to media access error. [Step 4]');
+      endCallRef.current?.(); // Use the ref
+      return null;
+    }
+  }, [setCallState]);
+
+
+  /**
+   * Start call duration timer (kept as useCallback for stability)
+   */
+  const startCallTimer = useCallback(() => {
+    console.log('startCallTimer: Starting call duration timer.');
+    callTimerRef.current = setInterval(() => {
+      if (callStartTimeRef.current) {
+        const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+        setCallState(prev => ({ ...prev, callDuration: duration }));
+      }
+    }, 1000);
+  }, [setCallState]);
+
+
+  /**
+   * Start a video call (initiator)
+   */
+  const startCall = useCallback(async () => {
+    console.log('startCall: Initiating video call sequence.');
+    if (!recipientId) { // Check if recipient is available
+        console.error('startCall: Cannot initiate call, recipient is undefined. Please ensure another user is in the room.');
+        return; // Prevent starting call without a recipient
+    }
+    try {
+      const localStream = await getUserMedia();
+      if (!localStream) {
+        console.error('startCall: No local stream obtained. Aborting call.');
+        return;
+      }
+      console.log('startCall: Local stream obtained successfully.');
+
+      const peerConnection = initializePeerConnection();
+      if (!peerConnection) {
+        console.error('startCall: Failed to initialize peer connection. Aborting call.');
+        endCallRef.current?.(); // Use the ref
+        return;
+      }
+      console.log('startCall: Peer connection initialized.');
+
+      // Add local stream to peer connection
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+        console.log(`startCall: Added local track: ${track.kind}`);
+      });
+
+      // Create and send offer
+      console.log('startCall: Creating offer...');
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      console.log('startCall: Local description set (offer).');
+
+      if (socket?.emit) {
+        console.log('startCall: Emitting WebRTC offer signal to', recipientId);
+        socket.emit('webrtc-signal', {
+          type: 'offer',
+          data: offer,
+          roomId,
+          sender: username,
+          recipient: recipientId // <-- ADDED: Include recipient in offer
+        });
+      }
+
+      // Update call state
+      setCallState(prev => ({
+        ...prev,
+        isActive: true,
+        localStream
+      }));
+      console.log('startCall: Call state updated to isActive: true.');
+
+      // Start call timer
+      callStartTimeRef.current = Date.now();
+      startCallTimer();
+      console.log('startCall: Call timer started.');
+
+      console.log('startCall: Video call sequence complete.');
+    } catch (error) {
+      console.error('startCall: Uncaught error during call initiation:', error);
+      endCallRef.current?.(); // Use the ref
+    }
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState, recipientId]);
+
+
+  /**
+   * Answer an incoming call (receiver)
+   */
+  const answerCall = useCallback(async (offer: RTCSessionDescriptionInit) => {
+    console.log('answerCall: Answering incoming call sequence.');
+    if (!recipientId) { // Check if recipient is available (the other user's ID)
+        console.error('answerCall: Cannot answer call, recipient is undefined.');
+        return; // Prevent answering call without a recipient
+    }
+    try {
+      const localStream = await getUserMedia();
+      if (!localStream) {
+        console.error('answerCall: No local stream obtained. Aborting answer.');
+        return;
+      }
+      console.log('answerCall: Local stream obtained successfully for answer.');
+
+      const peerConnection = initializePeerConnection();
+      if (!peerConnection) {
+        console.error('answerCall: Failed to initialize peer connection for answer. Aborting.');
+        endCallRef.current?.(); // Use the ref
+        return;
+      }
+      console.log('answerCall: Peer connection initialized for answer.');
+
+      // Add local stream to peer connection
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+        console.log(`answerCall: Added local track for answer: ${track.kind}`);
+      });
+
+      // Set remote description and create answer
+      console.log('answerCall: Setting remote description (offer) and creating answer...');
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      console.log('answerCall: Local description set (answer).');
+
+      if (socket?.emit) {
+        console.log('answerCall: Emitting WebRTC answer signal.');
+        socket.emit('webrtc-signal', {
+          type: 'answer',
+          data: answer,
+          roomId,
+          sender: username,
+          recipient: recipientId // <-- ADDED: Include recipient in answer
+        });
+      }
+
+      // Update call state
+      setCallState(prev => ({
+        ...prev,
+        isActive: true,
+        localStream
+      }));
+      console.log('answerCall: Call state updated to isActive: true.');
+
+      // Start call timer
+      callStartTimeRef.current = Date.now();
+      startCallTimer();
+      console.log('answerCall: Call timer started.');
+
+      console.log('answerCall: Call answer sequence complete.');
+    } catch (error) {
+      console.error('answerCall: Uncaught error during call answering:', error);
+      endCallRef.current?.(); // Use the ref
+    }
+  }, [getUserMedia, initializePeerConnection, socket, roomId, username, startCallTimer, setCallState, recipientId]);
+
+
+  /**
+   * Toggle local video
+   */
+  const toggleVideo = useCallback(() => {
+    if (callState.localStream) {
+      const videoTrack = callState.localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setCallState(prev => ({
+          ...prev,
+          isLocalVideoEnabled: videoTrack.enabled
+        }));
+        console.log(`toggleVideo: Local video enabled: ${videoTrack.enabled}`);
+      } else {
+        console.warn('toggleVideo: No video track found in local stream.');
+      }
+    } else {
+      console.warn('toggleVideo: No local stream to toggle video.');
+    }
+  }, [callState.localStream, setCallState]);
+
+  /**
+   * Toggle local audio
+   */
+  const toggleAudio = useCallback(() => {
+    if (callState.localStream) {
+      const audioTrack = callState.localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setCallState(prev => ({
+          ...prev,
+          isLocalAudioEnabled: audioTrack.enabled
+        }));
+        console.log(`toggleAudio: Local audio enabled: ${audioTrack.enabled}`);
+      } else {
+        console.warn('toggleAudio: No audio track found in local stream.');
+      }
+    } else {
+      console.warn('toggleAudio: No local stream to toggle audio.');
+    }
+  }, [callState.localStream, setCallState]);
+
+
+  /**
+   * Format call duration for display
+   */
+  const formatCallDuration = useCallback((seconds: number): string => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, []);
 
-  // --- DEBUGGING LOGS: START ---
-  // These logs will help you see the state of participants and recipientUsername
+  /**
+   * Handle WebRTC signaling messages
+   */
   useEffect(() => {
-    console.log('ChatPage DEBUG: Current roomState.username:', roomState.username);
-    console.log('ChatPage DEBUG: Current roomState.participants:', roomState.participants);
-    console.log('ChatPage DEBUG: Calculated recipientUsername:', recipientUsername);
-  }, [roomState.username, roomState.participants, recipientUsername]);
-  // --- DEBUGGING LOGS: END ---
-
-
-  /**
-   * Add a notification
-   */
-  const addNotification = useCallback((
-    type: NotificationData['type'],
-    title: string,
-    message: string,
-    duration?: number
-  ) => {
-    const notification: NotificationData = {
-      id: Date.now().toString(),
-      type,
-      title,
-      message,
-      duration
-    };
-
-    setNotifications(prev => [...prev, notification]);
-  }, []);
-
-  /**
-   * Dismiss a notification
-   */
-  const dismissNotification = useCallback((id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  }, []);
-
-  /**
-   * Handle image click to open in viewer modal
-   */
-  const handleImageClick = useCallback((imageUrl: string) => {
-    setCurrentViewingImage(imageUrl);
-    setIsImageViewerOpen(true);
-  }, []);
-
-  /**
-   * Handle closing the image viewer modal
-   */
-  const handleCloseImageViewer = useCallback(() => {
-    setIsImageViewerOpen(false);
-    setCurrentViewingImage(null);
-  }, []);
-
-  /**
-   * Join a chat room
-   */
-  const handleJoinRoom = useCallback((roomId: string, username: string) => {
-    if (!socket.isConnected) {
-      addNotification('error', 'Connection Error', 'Unable to connect to chat server');
-      return;
-    }
-
-    setIsConnecting(true);
-
-    // Clear messages on a fresh join before history loads
-    setRoomState(prev => ({
-      ...prev,
-      roomId,
-      username,
-      isConnected: false,
-      messages: []
-    }));
-
-    // Join room via socket
-    socket.joinRoom(roomId, username);
-  }, [socket, addNotification]);
-
-  /**
-   * Leave the current room
-   */
-  const handleLeaveRoom = useCallback(() => {
-    if (roomState.roomId && roomState.username) {
-      socket.leaveRoom(roomState.roomId, roomState.username);
-    }
-
-    // End video call if active
-    if (webRTC.callState.isActive) {
-      webRTC.endCall();
-    }
-
-    // Reset state after leaving the room
-    setRoomState({
-      roomId: '',
-      username: '',
-      isConnected: false,
-      participants: [],
-      messages: [] // Clear messages when truly leaving the room
-    });
-
-    setIsRoomModalOpen(true);
-    setIsConnecting(false);
-    setTypingUser(undefined);
-
-    addNotification('info', 'Left Room', 'You have left the chat room');
-  }, [roomState, socket, webRTC, addNotification]);
-
-  /**
-   * Send a message
-   * No longer performs optimistic UI update for the message itself.
-   * Relies on backend's 'message-received' event for display.
-   */
-  const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp' | 'isSelf'>) => {
-    if (!roomState.isConnected) {
-      addNotification('error', 'Connection Error', 'Not connected to chat room');
-      return;
-    }
-
-    // Send only the necessary data to the backend.
-    // The backend will save it, generate ID/timestamp, and broadcast it back.
-    socket.sendMessage({
-      roomId: message.roomId,
-      sender: message.sender,
-      content: message.content,
-      imageData: message.imageData,
-      messageType: message.messageType
-    });
-  }, [roomState.isConnected, socket, addNotification]);
-
-  /**
-   * Handle typing start
-   */
-  const handleTypingStart = useCallback(() => {
-    if (roomState.isConnected) {
-      socket.sendTypingStatus(roomState.roomId, roomState.username, true);
-    }
-  }, [roomState, socket]);
-
-  /**
-   * Handle typing stop
-   */
-  const handleTypingStop = useCallback(() => {
-    if (roomState.isConnected) {
-      socket.sendTypingStatus(roomState.roomId, roomState.username, false);
-    }
-  }, [roomState, socket]);
-
-  /**
-   * Set up socket event listeners
-   */
-  useEffect(() => {
-    console.log('ChatPage: useEffect (Socket Listeners) Mounted.');
-
-    if (!socket.on) {
-        console.warn('ChatPage: Socket instance not ready for event listeners.');
+    console.log('useEffect: Setting up WebRTC signal listener.');
+    if (!socket?.on) {
+        console.warn('useEffect: Socket is not ready to set up WebRTC signal listener.');
         return;
     }
 
-    // Room joined successfully
-    const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
-      console.log('Room joined successfully:', data);
-      // --- DEBUGGING LOGS: START ---
-      console.log('ChatPage DEBUG: room-joined event - received participants:', data.participants);
-      // --- DEBUGGING LOGS: END ---
-
-      setRoomState(prev => ({
-        ...prev,
-        isConnected: true,
-        participants: data.participants // Backend provides actual participant list
-      }));
-
-      setIsRoomModalOpen(false);
-      setIsConnecting(false);
-    });
-
-    // Handle historical messages from the server
-    const unsubscribeMessageHistory = socket.on('message-history', (data: { roomId: string; messages: ChatMessage[] }) => {
-      console.log('Received message history:', data.messages);
-      setRoomState(prev => {
-        const historicalMessagesWithSelfFlag = data.messages.map(msg => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp), // Ensure timestamp is a Date object
-          isSelf: msg.sender === prev.username // Mark messages sent by self
-        }));
-
-        // Simply replace the messages with historical messages, ensuring correct order
-        return {
-          ...prev,
-          messages: historicalMessagesWithSelfFlag.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-        };
-      });
-    });
-
-    // User left room
-    const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
-      console.log('User left room:', data);
-
-      if (data.username !== roomState.username) {
-        setRoomState(prev => ({
-          ...prev,
-          participants: prev.participants.filter(p => p !== data.username)
-        }));
+    const handleWebRTCSignal = async (signal: WebRTCSignal) => {
+      console.log(`handleWebRTCSignal: Received signal type: ${signal.type} from ${signal.sender}`);
+      // Ensure signal is for this room and not from self
+      if (signal.roomId !== roomId || signal.sender === username) {
+        console.log('handleWebRTCSignal: Signal ignored (not for this room or from self).');
+        return;
       }
-    });
+      // CRITICAL CHECK: If the signal has a 'recipient' field, ensure it's for *this* client.
+      // This prevents clients from processing signals not intended for them in multi-user rooms.
+      if (signal.recipient && signal.recipient !== username) {
+        console.log(`handleWebRTCSignal: Signal ignored (intended for ${signal.recipient}, not ${username}).`);
+        return;
+      }
 
-    // Message received (this will handle new messages AND system messages from backend)
-    const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
-      console.log('Message received:', message);
 
-      setRoomState(prev => {
-        // Check if message ID already exists to prevent duplicates
-        if (prev.messages.some(msg => msg.id === message.id)) {
-          return prev; // Message already present, do nothing
+      try {
+        switch (signal.type) {
+          case 'offer':
+            console.log('handleWebRTCSignal: Processing offer.');
+            // This is an incoming call offer, so answer it
+            await answerCall(signal.data);
+            break;
+            
+          case 'answer':
+            console.log('handleWebRTCSignal: Processing answer.');
+            if (peerConnectionRef.current) {
+              await peerConnectionRef.current.setRemoteDescription(
+                new RTCSessionDescription(signal.data)
+              );
+              console.log('handleWebRTCSignal: Remote description set (answer).');
+            } else {
+              console.warn('handleWebRTCSignal: Peer connection not initialized when receiving answer.');
+            }
+            break;
+            
+          case 'ice-candidate':
+            console.log('handleWebRTCSignal: Processing ICE candidate.');
+            if (peerConnectionRef.current) {
+              await peerConnectionRef.current.addIceCandidate(
+                new RTCIceCandidate(signal.data)
+              );
+              console.log('handleWebRTCSignal: ICE candidate added.');
+            } else {
+              console.warn('handleWebRTCSignal: Peer connection not initialized when receiving ICE candidate.');
+            }
+            break;
+            
+          case 'call-end':
+            console.log('handleWebRTCSignal: Received call-end signal. Ending call locally.');
+            endCallRef.current?.(); // Use the ref
+            break;
+
+          default:
+            console.warn(`handleWebRTCSignal: Unknown signal type: ${signal.type}`);
         }
-
-        const receivedMessage: ChatMessage = {
-          ...message,
-          timestamp: new Date(message.timestamp), // Ensure timestamp is Date object
-          isSelf: message.sender === prev.username
-        };
-
-        return {
-          ...prev,
-          messages: [...prev.messages, receivedMessage].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()) // Re-sort to ensure order
-        };
-      });
-    });
-
-    // User typing
-    const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
-      console.log('User typing:', data);
-
-      if (data.username !== roomState.username) {
-        setTypingUser(data.isTyping ? data.username : undefined);
+      } catch (error) {
+        console.error('handleWebRTCSignal: Error handling WebRTC signal:', error);
       }
-    });
-
-    // Connection status (participantCount might update here too)
-    const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number, username: string }) => {
-      console.log('Connection status:', data);
-
-      setRoomState(prev => {
-        // ONLY update isConnected here.
-        // Rely on 'room-joined' and 'room-left' events for actual participant list changes.
-        // This prevents unnecessary re-creation of the participants array.
-        return {
-          ...prev,
-          isConnected: data.connected,
-          // If you need to reflect participantCount (number) specifically, you can add it as a separate state.
-          // For now, we are relying on `roomState.participants.length` to get the count.
-          // participantCount: data.participantCount, // Optional, if you want to store this number separately
-        };
-      });
-    });
-
-    // Error handling
-    const unsubscribeError = socket.on('error', (data: { message: string }) => {
-      console.error('Socket error:', data);
-
-      addNotification('error', 'Error', data.message);
-      setIsConnecting(false);
-    });
-
-    // Cleanup function for socket listeners
-    return () => {
-      console.log('ChatPage: useEffect (Socket Listeners) Cleanup - ChatPage is unmounting or dependencies changed.');
-      unsubscribeRoomJoined();
-      unsubscribeMessageHistory();
-      unsubscribeRoomLeft();
-      unsubscribeMessageReceived();
-      unsubscribeUserTyping();
-      unsubscribeConnectionStatus();
-      unsubscribeError();
     };
-  }, [socket, roomState.username]); // Added roomState.username to dependencies
 
+    // Attach the listener
+    socket.on('webrtc-signal', handleWebRTCSignal);
+    console.log('useEffect: WebRTC signal listener attached.');
+
+    // Cleanup function - CRITICAL FIX for TypeError: e.off is not a function
+    return () => {
+      if (socket && typeof socket.off === 'function') {
+        socket.off('webrtc-signal', handleWebRTCSignal);
+        console.log('useEffect: Cleaned up WebRTC signal listener.');
+      } else {
+        console.warn('useEffect cleanup: Socket is null or does not have .off method. Skipping listener cleanup.');
+      }
+    };
+  }, [socket, roomId, username, recipientId, answerCall]);
+    
   /**
-   * Handle connection errors from useSocket hook
+   * Cleanup on component unmount
    */
   useEffect(() => {
-    console.log('ChatPage: useEffect (Connection Error) Mounted.');
-    if (socket.connectionError) {
-      addNotification('error', 'Connection Failed', socket.connectionError);
-      setIsConnecting(false);
-    }
     return () => {
-        console.log('ChatPage: useEffect (Connection Error) Cleanup.');
-    }
-  }, [socket.connectionError, addNotification]);
-
-  // Handle starting the video call with the recipient
-  const handleStartVideoCall = useCallback(() => {
-    if (!recipientUsername) {
-      addNotification('error', 'Call Error', 'No other user available for a call.');
-      console.warn('handleStartVideoCall: No recipient username found.');
-      return;
-    }
-    // Call the startCall function from useWebRTC, which now knows the recipient
-    webRTC.startCall();
-  }, [recipientUsername, webRTC, addNotification]);
+      console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
+      endCallRef.current?.(); // Use the ref
+    };
+  }, []);
 
 
-  return (
-    <div className="flex h-screen flex-col bg-gray-50">
-      {/* Room Join Modal */}
-      <RoomJoinModal
-        isOpen={isRoomModalOpen}
-        onJoinRoom={handleJoinRoom}
-        isConnecting={isConnecting}
-      />
-
-      {/* Main Chat Interface */}
-      {!isRoomModalOpen && (
-        <>
-          {/* Chat Header - Make it fixed at the top */}
-          <ChatHeader
-            className="flex-none"
-            roomId={roomState.roomId}
-            isConnected={roomState.isConnected}
-            participantCount={roomState.participants.length}
-            onStartVideoCall={handleStartVideoCall} // Corrected JSX comment syntax issue
-            onLeaveRoom={handleLeaveRoom}
-          />
-
-          {/* Chat Messages */}
-          <ChatMessages
-            messages={roomState.messages}
-            currentUsername={roomState.username}
-            typingUser={typingUser}
-            onImageClick={handleImageClick}
-          />
-
-          {/* Message Input - Make it fixed at the bottom */}
-          <MessageInput
-            className="flex-none"
-            onSendMessage={handleSendMessage}
-            onTypingStart={handleTypingStart}
-            onTypingStop={handleTypingStop}
-            roomId={roomState.roomId}
-            username={roomState.username}
-            disabled={!roomState.isConnected}
-          />
-
-          {/* Video Call Modal */}
-          <VideoCallModal
-            isOpen={webRTC.callState.isActive}
-            callState={webRTC.callState}
-            localVideoRef={webRTC.localVideoRef}
-            remoteVideoRef={webRTC.remoteVideoRef}
-            onEndCall={webRTC.endCall}
-            onToggleVideo={webRTC.toggleVideo}
-            onToggleAudio={webRTC.toggleAudio}
-            formatCallDuration={webRTC.formatCallDuration}
-          />
-        </>
-      )}
-
-      {/* Notification Toasts */}
-      <NotificationToast
-        notifications={notifications}
-        onDismiss={dismissNotification}
-      />
-
-      {/* Image Viewer Modal */}
-      <ImageViewerModal
-        isOpen={isImageViewerOpen}
-        imageUrl={currentViewingImage}
-        onClose={handleCloseImageViewer}
-      />
-    </div>
-  );
+  return {
+    callState,
+    localVideoRef,
+    remoteVideoRef,
+    startCall,
+    endCall,
+    toggleVideo,
+    toggleAudio,
+    formatCallDuration
+  };
 }
