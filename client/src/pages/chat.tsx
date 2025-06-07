@@ -440,7 +440,7 @@ export default function ChatPage() {
                     {/* Video Call Modal */}
                     {/* The modal should be open if a call is active OR if there's an incoming offer */}
                     <VideoCallModal
-                        isOpen={callState.isActive || !!callState.incomingCallOffer} {/* <--- MODIFIED: Open if active or incoming */}
+                        isOpen={callState.isActive || !!callState.incomingCallOffer}
                         callState={callState}
                         localVideoRef={localVideoRef}
                         remoteVideoRef={remoteVideoRef}
