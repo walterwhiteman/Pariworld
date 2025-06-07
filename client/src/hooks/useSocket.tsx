@@ -41,22 +41,26 @@ export function SocketProvider({ children }: SocketProviderProps) {
         console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
         // Initialize Socket.IO client with the specified backend URL and path
         const socketInstance = io(BACKEND_URL, {
-            path: '/ws', // <--- CHANGED: Aligning client path with backend's /ws
+            path: '/ws', // Aligning client path with backend's /ws
             transports: ['polling', 'websocket'],
             withCredentials: true, // Important for CORS and session handling
+            // Removed forceNew: true to allow socket.io's internal reconnection to manage the instance
+            // forceNew: true, // Forces a new connection for each instance - REMOVED FOR STABILITY
             pingInterval: 30000, // Keep-alive ping interval
             pingTimeout: 25000,  // How long to wait for a pong before disconnecting
-            forceNew: true, // Forces a new connection for each instance
-            reconnectionAttempts: 10, // Max reconnection attempts
+            reconnectionAttempts: Infinity, // Allow infinite reconnection attempts
             reconnectionDelay: 1000, // Initial delay before reconnection attempt
             reconnectionDelayMax: 5000, // Max delay between reconnection attempts
             randomizationFactor: 0.5 // Randomization factor for reconnection delay
         } as Partial<ManagerOptions & SocketOptions>); // Type assertion for options compatibility
 
+        // Set the socket instance immediately after creation.
+        // This is the single, persistent socket instance for the lifetime of the provider.
+        setSocket(socketInstance);
+
         // Event listener for successful connection
         socketInstance.on('connect', () => {
             console.log('[SocketProvider] Socket.IO connected successfully! (Frontend)');
-            setSocket(socketInstance);
             setIsConnected(true);
             setConnectionError(null); // Clear any previous connection errors
             console.log('[SocketProvider] Socket state set to connected instance. (Inside connect handler)');
@@ -66,8 +70,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         socketInstance.on('disconnect', (reason) => {
             console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
             setIsConnected(false);
-            setSocket(undefined); // Clear socket instance on disconnect
-            // Provide user-friendly messages for different disconnection reasons
+            // DO NOT setSocket(undefined) here. Let the socketInstance manage its own state internally.
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
             } else {
@@ -86,7 +89,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
                                 error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
             setIsConnected(false);
-            setSocket(undefined);
+            // DO NOT setSocket(undefined) here.
         });
 
         // Event listener for reconnection attempts
@@ -98,7 +101,6 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Event listener for successful reconnection
         socketInstance.on('reconnect', (attemptNumber) => {
             console.log(`[SocketProvider] Reconnected successfully after ${attemptNumber} attempts`);
-            setSocket(socketInstance);
             setIsConnected(true);
             setConnectionError(null); // Clear error on successful reconnection
         });
@@ -107,21 +109,22 @@ export function SocketProvider({ children }: SocketProviderProps) {
         socketInstance.on('reconnect_error', (error) => {
             console.error('[SocketProvider] Reconnect error:', error.message);
             setConnectionError(`Reconnect failed: ${error.message}`);
-            setSocket(undefined);
+            // DO NOT setSocket(undefined) here.
         });
 
         // Event listener for permanent reconnection failure
         socketInstance.on('reconnect_failed', () => {
             console.error('[SocketProvider] Reconnect failed permanently.');
             setConnectionError('Reconnect failed permanently. Please refresh.');
-            setSocket(undefined);
+            // DO NOT setSocket(undefined) here.
         });
 
         // Cleanup function: disconnect socket when component unmounts
         return () => {
+            // Use socketInstance from the closure, not the state 'socket' which might be undefined
             if (socketInstance) {
                 console.log('[SocketProvider useEffect] Disconnecting Socket.IO client on provider unmount.');
-                socketInstance.offAny(); // Remove all event listeners
+                socketInstance.offAny(); // Remove all event listeners attached to this socket instance
                 socketInstance.disconnect(); // Disconnect the socket
             }
         };
@@ -133,6 +136,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
      * @param payload The data to send with the event.
      */
     const emit = useCallback((eventName: string, payload: any) => {
+        // Use the 'socket' from state, as it will be updated by useEffect on mount
         if (socket && socket.connected) {
             socket.emit(eventName, payload);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, payload);
@@ -148,6 +152,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
      * @returns A cleanup function to unsubscribe from the event.
      */
     const on = useCallback((eventName: string, handler: (...args: any[]) => void) => {
+        // Use the 'socket' from state, as it will be updated by useEffect on mount
         if (socket) {
             socket.on(eventName, handler);
         } else {
@@ -155,6 +160,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         }
         // Return a cleanup function to remove the handler when no longer needed
         return () => {
+            // Use the 'socket' from state here too, as it's the one we attached to
             if (socket) {
                 socket.off(eventName, handler);
             }
