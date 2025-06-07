@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from 'socket.io';
 import { storage } from "./storage"; // Make sure storage.ts is updated as provided previously
-import { RoomParticipant } from "@shared/schema";
+import { RoomParticipant } from "@shared/schema"; // Ensure this path is correct based on your project structure
 
 // NOTE: This interface is for backend context.
 // It should align with the ChatMessage interface in storage.ts and your Drizzle schema.
@@ -21,6 +21,7 @@ interface ConnectedClientInfo {
     username: string;
 }
 
+// Map to store which username is associated with which socket ID
 const usernameToSocketIdMap = new Map<string, string>();
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -35,7 +36,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const io = new SocketIOServer(httpServer, {
         path: '/ws',
         cors: {
-            origin: "https://pariworld.onrender.com",
+            origin: "https://pariworld.onrender.com", // Ensure this matches your frontend deployment URL
             methods: ["GET", "POST"],
             credentials: true
         }
@@ -43,6 +44,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Helper functions (defined after `io` is initialized to ensure `io.sockets.adapter` is available)
     const getRoomParticipantCount = (roomId: string): number => {
+        // Returns the number of active sockets in a room
         return io.sockets.adapter.rooms.get(roomId)?.size || 0;
     };
 
@@ -50,9 +52,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const participants: string[] = [];
         const roomSockets = io.sockets.adapter.rooms.get(roomId);
         if (roomSockets) {
+            // Iterate over socket IDs in the room and find corresponding usernames
             roomSockets.forEach(socketId => {
+                // Find the username associated with this socketId
                 for (const [username, id] of usernameToSocketIdMap.entries()) {
-                    if (id === socketId) participants.push(username);
+                    if (id === socketId) {
+                        participants.push(username);
+                        break; // Found the username, move to the next socketId
+                    }
                 }
             });
         }
@@ -69,19 +76,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     app.get('/api/rooms/:roomId', async (req, res) => {
         try {
             const { roomId } = req.params;
-            const participants = await storage.getRoomParticipants(roomId);
-            const activeParticipants = participants.filter(p => p.isActive);
-
-            // Using `io` directly here. Ensure this route is hit after io is initialized.
-            const roomSockets = io.sockets.adapter.rooms.get(roomId);
-            const onlineParticipants: string[] = [];
-            if (roomSockets) {
-                roomSockets.forEach(socketId => {
-                    for (const [username, id] of usernameToSocketIdMap.entries()) {
-                        if (id === socketId) onlineParticipants.push(username);
-                    }
-                });
-            }
+            // The `storage.getRoomParticipants` might get all participants ever,
+            // but `getRoomParticipants` above gets currently online ones.
+            // It's good to use the online list for real-time participant count.
+            const onlineParticipants = getRoomParticipants(roomId);
 
             res.json({
                 roomId,
@@ -105,15 +103,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 return;
             }
 
+            // Check the number of current participants in the room
+            const currentParticipantsInRoom = getRoomParticipantCount(roomId);
+
+            // --- IMPORTANT: Implement the 2-user limit for rooms (especially for video calls) ---
+            if (currentParticipantsInRoom >= 2) {
+                console.log(`Room ${roomId} is full. User ${username} cannot join for video call.`);
+                socket.emit('error', { message: 'This room is currently full for video calls (max 2 participants).' });
+                return; // Prevent joining the room if it's full
+            }
+            // --- End of 2-user limit check ---
+
             socket.join(roomId);
             usernameToSocketIdMap.set(username, socket.id);
 
+            // Store room and username in socket data for easy access on disconnect
             socket.data.roomId = roomId;
             socket.data.username = username;
 
             console.log(`User ${username} (Socket ID: ${socket.id}) joined room ${roomId}`);
 
             try {
+                // Add participant to the database, marking them as active
                 await storage.addRoomParticipant(roomId, username);
             } catch (error) {
                 console.error('Error storing room participant:', error);
@@ -140,9 +151,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 console.error('Error fetching previous messages:', error);
             }
 
+            // Get updated list of participants for the room
+            const currentRoomParticipants = getRoomParticipants(roomId);
+
+            // Emit 'room-joined' only to the joining socket
             socket.emit('room-joined', {
                 roomId,
-                participants: getRoomParticipants(roomId).filter(p => p !== username)
+                // Send other participants *excluding* the current user
+                participants: currentRoomParticipants.filter(p => p !== username)
             });
 
             // System message for user joining - using generated ID (not stored in DB)
@@ -155,19 +171,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 timestamp: new Date().toISOString()
             });
 
+            // Broadcast connection status update to all in the room
             io.to(roomId).emit('connection-status', {
-                connected: true,
+                connected: true, // This indicates a general connection status, not individual user status
                 participantCount: getRoomParticipantCount(roomId),
-                username
+                username // The username of the user who just connected/updated status
             });
         });
 
         socket.on('leave-room', async ({ roomId, username }) => {
+            // Ensure the socket leaving is the one associated with the username
             if (usernameToSocketIdMap.get(username) === socket.id) {
                 socket.leave(roomId);
-                usernameToSocketIdMap.delete(username);
+                usernameToSocketIdMap.delete(username); // Remove from our map
 
                 try {
+                    // Update participant status in DB to inactive
                     await storage.removeRoomParticipant(roomId, username);
                 } catch (error) {
                     console.error('Error removing room participant:', error);
@@ -183,11 +202,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     timestamp: new Date().toISOString()
                 });
 
+                // Emit 'room-left' to all in the room to update their participant lists
                 io.to(roomId).emit('room-left', { roomId, username });
+                
+                // Broadcast updated connection status to all in the room
                 io.to(roomId).emit('connection-status', {
-                    connected: true,
+                    connected: true, // This reflects overall room connection, not a specific user
                     participantCount: getRoomParticipantCount(roomId),
-                    username
+                    username // The username of the user who just left
                 });
 
                 console.log(`User ${username} left room ${roomId}`);
@@ -195,19 +217,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         socket.on('send-message', async (messageData) => {
-            const { roomId, username } = socket.data;
+            const { roomId, username } = socket.data; // Retrieve room and username from socket data
 
             if (!roomId || !username) {
                 socket.emit('error', { message: 'Must join a room first' });
                 return;
             }
 
-            // Create message object to be saved. No ID or timestamp here.
+            // Create message object to be saved. No ID or timestamp here, as DB will generate.
             const messageToSave = {
                 roomId,
                 sender: username,
-                content: messageData.content || null, // Ensure null if undefined
-                imageData: messageData.imageData || null, // Ensure null if undefined
+                content: messageData.content || null, // Ensure null if content is empty/undefined
+                imageData: messageData.imageData || null, // Ensure null if imageData is empty/undefined
                 messageType: messageData.messageType || 'text',
             };
 
@@ -237,17 +259,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         socket.on('typing-start', ({ roomId, username }) => {
+            // Broadcast to all in the room EXCEPT the sender
             socket.to(roomId).emit('user-typing', { username, isTyping: true });
         });
 
         socket.on('typing-stop', ({ roomId, username }) => {
+            // Broadcast to all in the room EXCEPT the sender
             socket.to(roomId).emit('user-typing', { username, isTyping: false });
         });
 
+        // WebRTC signaling
         socket.on('webrtc-signal', ({ roomId, sender, recipient, type, data }) => {
             const recipientSocketId = usernameToSocketIdMap.get(recipient);
 
             if (recipientSocketId && recipientSocketId !== socket.id) {
+                // Forward the signal to the intended recipient
                 io.to(recipientSocketId).emit('webrtc-signal', {
                     roomId,
                     sender,
@@ -260,26 +286,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 console.warn(`User ${sender} tried to send WebRTC signal to self. Ignored.`);
             } else {
                 console.warn(`Recipient '${recipient}' not online for WebRTC signal from ${sender}.`);
-                socket.emit('error', { message: `Recipient '${recipient}' not available.` });
+                // Optionally, inform the sender that the recipient is not available
+                socket.emit('error', { message: `Recipient '${recipient}' is not currently available for a call.` });
             }
         });
+
 
         socket.on('disconnect', async () => {
             console.log('Socket.IO disconnected:', socket.id);
 
             let disconnectedUsername: string | undefined;
+            // Find the username associated with the disconnected socket ID
             for (const [username, id] of usernameToSocketIdMap.entries()) {
                 if (id === socket.id) {
                     disconnectedUsername = username;
-                    usernameToSocketIdMap.delete(username);
+                    usernameToSocketIdMap.delete(username); // Remove from map
                     break;
                 }
             }
 
-            const disconnectedRoomId = socket.data.roomId;
+            const disconnectedRoomId = socket.data.roomId; // Retrieve room ID from socket data
 
             if (disconnectedRoomId && disconnectedUsername) {
                 try {
+                    // Update participant status in DB to inactive
                     await storage.removeRoomParticipant(disconnectedRoomId, disconnectedUsername);
                 } catch (error) {
                     console.error('Error removing participant on disconnect:', error);
@@ -295,11 +325,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     timestamp: new Date().toISOString()
                 });
 
+                // Emit 'room-left' and 'connection-status' to inform remaining users
                 io.to(disconnectedRoomId).emit('room-left', { roomId: disconnectedRoomId, username: disconnectedUsername });
                 io.to(disconnectedRoomId).emit('connection-status', {
-                    connected: true,
+                    connected: true, // This reflects overall room connection, not a specific user
                     participantCount: getRoomParticipantCount(disconnectedRoomId),
-                    username: disconnectedUsername
+                    username: disconnectedUsername // The username of the user who just disconnected
                 });
 
                 console.log(`User ${disconnectedUsername} disconnected from room ${disconnectedRoomId}`);
@@ -307,6 +338,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
     });
 
+    // Cleanup old messages every hour
     const cleanupInterval = setInterval(async () => {
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
         try {
@@ -318,7 +350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
     }, 60 * 60 * 1000); // Run every hour
 
-    httpServer.on('close', () => clearInterval(cleanupInterval));
+    httpServer.on('close', () => clearInterval(cleanupInterval)); // Clean up interval on server close
 
     console.log('Socket.IO server initialized on /ws path');
 
