@@ -447,26 +447,33 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
       }
     };
 
-    // Clean up previous listener before adding a new one to prevent duplicates
-    const cleanup = () => {
-      socket.off('webrtc-signal', handleWebRTCSignal);
-      console.log('useEffect: Cleaned up WebRTC signal listener.');
-    };
+    // Attach the listener
     socket.on('webrtc-signal', handleWebRTCSignal);
+    console.log('useEffect: WebRTC signal listener attached.');
 
-    // Keep endCall here for the cleanup function only, as it's critical for unmount
-    return cleanup; 
-  }, [socket, roomId, username, answerCall]); // endCall removed from dependencies (except for cleanup)
+    // Cleanup function - CRITICAL FIX for TypeError: e.off is not a function
+    return () => {
+      // ONLY call .off() if socket exists and has an .off method
+      if (socket && typeof socket.off === 'function') { 
+        socket.off('webrtc-signal', handleWebRTCSignal);
+        console.log('useEffect: Cleaned up WebRTC signal listener.');
+      } else {
+        console.warn('useEffect cleanup: Socket is null or does not have .off method. Skipping listener cleanup.');
+      }
+    };
+  }, [socket, roomId, username, answerCall]); // Dependencies for this useEffect
+                                             // endCall is intentionally not here as it's a plain function now
 
 
   /**
-   * Cleanup on unmount
+   * Cleanup on component unmount
    */
   useEffect(() => {
     // This effect's cleanup runs when the component unmounts.
+    // It also runs before the effect re-runs if dependencies change.
     return () => {
       console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
-      endCall(); // This needs to call the latest endCall
+      endCall(); // This needs to call the latest endCall function
     };
   }, [endCall]); // endCall *must* be in this dependency array for the cleanup to be correct
 
