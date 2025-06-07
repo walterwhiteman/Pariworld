@@ -8,6 +8,7 @@ import { VideoCallState, WebRTCSignal } from '@/types/chat';
  * Implements peer-to-peer video communication for the chat application
  */
 export function useWebRTC(socket: any, roomId: string, username: string) {
+  // 1. State and Ref declarations (must come first)
   const [callState, setCallState] = useState<VideoCallState>({
     isActive: false,
     isLocalVideoEnabled: true,
@@ -23,7 +24,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
   const callStartTimeRef = useRef<number | null>(null);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // WebRTC configuration with STUN servers
+  // 2. Constants like rtcConfig
   const rtcConfig: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -31,7 +32,7 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
     ]
   };
 
-  // Memoized endCall function to prevent re-creation issues with useEffect dependencies
+  // 3. Define endCall first, as other functions (initializePeerConnection, getUserMedia) depend on it
   const endCall = useCallback(() => {
     console.log('endCall: Ending video call sequence...');
 
@@ -456,6 +457,8 @@ export function useWebRTC(socket: any, roomId: string, username: string) {
    * Cleanup on unmount
    */
   useEffect(() => {
+    // This effect's cleanup runs when the component unmounts.
+    // It also runs before the effect re-runs if dependencies change.
     return () => {
       console.log('useEffect cleanup: Component unmounting, ensuring call is ended.');
       endCall();
