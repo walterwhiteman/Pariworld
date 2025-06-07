@@ -14,6 +14,7 @@ export function useWebRTC(socket: any, roomId: string, username: string, recipie
     isLocalVideoEnabled: true,
     isLocalAudioEnabled: true,
     localStream: null,
+    cdata: null, // Renamed 'data' to 'cdata' to avoid conflict with signal.data
     remoteStream: null,
     callDuration: 0
   });
@@ -98,6 +99,7 @@ export function useWebRTC(socket: any, roomId: string, username: string, recipie
       isLocalVideoEnabled: true,
       isLocalAudioEnabled: true,
       localStream: null,
+      cdata: null,
       remoteStream: null,
       callDuration: 0
     });
@@ -431,15 +433,26 @@ export function useWebRTC(socket: any, roomId: string, username: string, recipie
 
     const handleWebRTCSignal = async (signal: WebRTCSignal) => {
       console.log(`handleWebRTCSignal: Received signal type: ${signal.type} from ${signal.sender}`);
+      console.log(`handleWebRTCSignal DEBUG: Current client username (Yash's): ${username}`);
+      console.log(`handleWebRTCSignal DEBUG: Current client roomId (Yash's): ${roomId}`);
+      console.log(`handleWebRTCSignal DEBUG: Signal sender (Pari's): ${signal.sender}`);
+      console.log(`handleWebRTCSignal DEBUG: Signal roomId (from Pari): ${signal.roomId}`);
+      console.log(`handleWebRTCSignal DEBUG: Signal recipient (from Pari): ${signal.recipient}`);
+
+
       // Ensure signal is for this room and not from self
-      if (signal.roomId !== roomId || signal.sender === username) {
-        console.log('handleWebRTCSignal: Signal ignored (not for this room or from self).');
+      if (signal.roomId !== roomId) {
+        console.log(`handleWebRTCSignal: Signal ignored (roomId mismatch: signal.roomId='${signal.roomId}', client.roomId='${roomId}').`);
+        return;
+      }
+      if (signal.sender === username) {
+        console.log(`handleWebRTCSignal: Signal ignored (from self: signal.sender='${signal.sender}', client.username='${username}').`);
         return;
       }
       // CRITICAL CHECK: If the signal has a 'recipient' field, ensure it's for *this* client.
       // This prevents clients from processing signals not intended for them in multi-user rooms.
       if (signal.recipient && signal.recipient !== username) {
-        console.log(`handleWebRTCSignal: Signal ignored (intended for ${signal.recipient}, not ${username}).`);
+        console.log(`handleWebRTCSignal: Signal ignored (intended for '${signal.recipient}', not '${username}').`);
         return;
       }
 
