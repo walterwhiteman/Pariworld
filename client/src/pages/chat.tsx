@@ -37,12 +37,15 @@ export default function ChatPage() {
   const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
 
-  // Override for temporarily silencing the video call state and UI
-  const [isCallActiveOverride, setIsCallActiveOverride] = useState(false);
+  // --- Removed: isCallActiveOverride state and related useEffect ---
+  // The VideoCallModal's visibility is now solely managed by webRTC.callState.isActive.
 
   // Hooks
   const socket = useSocket();
+  // Ensure the correct Socket.IO client instance is passed to useWebRTC.
+  // Assuming 'socket' directly contains the client or exposes its methods.
   const webRTC = useWebRTC(socket, roomState.roomId, roomState.username);
+
 
   /**
    * Add a notification
@@ -337,14 +340,10 @@ export default function ChatPage() {
     }
   }, [socket.connectionError, addNotification]);
 
-  /**
-   * Temporarily override callState.isActive to false
-   * to silence the persistent "ending video call" console message
-   * (This is an existing override, kept as is)
-   */
-  useEffect(() => {
-    setIsCallActiveOverride(false);
-  }, []);
+  // --- Removed: This useEffect was for the override state, no longer needed ---
+  // useEffect(() => {
+  //   setIsCallActiveOverride(false);
+  // }, []);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
@@ -369,7 +368,7 @@ export default function ChatPage() {
           />
 
           {/* Chat Messages - This component's internal 'main' tag already has flex-1 and overflow-hidden,
-                           and its inner div has overflow-y-auto, so messages will scroll here. */}
+                             and its inner div has overflow-y-auto, so messages will scroll here. */}
           <ChatMessages
             messages={roomState.messages}
             currentUsername={roomState.username}
@@ -388,16 +387,16 @@ export default function ChatPage() {
             disabled={!roomState.isConnected}
           />
 
-          {/* Video Call Modal with override to hide */}
+          {/* Video Call Modal */}
           <VideoCallModal
-            isOpen={webRTC.callState.isActive && !isCallActiveOverride} // Use webRTC.callState.isActive directly for actual call state
+            isOpen={webRTC.callState.isActive} // Updated: Now directly uses webRTC.callState.isActive
             callState={webRTC.callState}
             localVideoRef={webRTC.localVideoRef}
             remoteVideoRef={webRTC.remoteVideoRef}
             onEndCall={webRTC.endCall}
             onToggleVideo={webRTC.toggleVideo}
             onToggleAudio={webRTC.toggleAudio}
-            onToggleSpeaker={webRTC.toggleSpeaker} // <-- Removed duplicate line
+            // Removed: onToggleSpeaker prop as it's not defined in VideoCallModal.tsx
             formatCallDuration={webRTC.formatCallDuration}
           />
         </>
