@@ -72,8 +72,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     return (
       <div
         key={message.id}
-        // Tailwind's space-y-4 on the parent div handles vertical spacing between messages.
-        // If individual messages had `mt-X` before, ensure it's removed if space-y is preferred.
+        // Outer message wrapper. 'flex-row-reverse' for self moves avatar to the right.
         className={`flex items-start space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : ''}`}
       >
         {/* Avatar */}
@@ -91,14 +90,20 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
           )}
         </div>
 
-        {/* Message Content */}
-        <div className={`flex-1 max-w-xs sm:max-w-sm lg:max-w-md ${isSelf ? 'items-end' : 'items-start'}`}>
+        {/* Message Content & Info Wrapper */}
+        {/* MODIFIED: Removed 'flex-1' and added 'ml-auto' or 'mr-auto' for correct horizontal alignment.
+                     This allows the div to shrink-wrap its content up to max-w-*. */}
+        <div
+          className={`max-w-xs sm:max-w-sm lg:max-w-md ${
+            isSelf ? 'ml-auto' : 'mr-auto' // 'ml-auto' pushes it to the right for self, 'mr-auto' pushes it to the left for others
+          }`}
+        >
           <div
             className={`shadow-sm ${
               isSelf
                 ? 'bg-blue-600 text-white rounded-2xl rounded-tr-md'
                 : 'bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-tl-md'
-            } px-4 py-2`}
+            } px-4 py-2`} // The actual message bubble
           >
             {/* Image Message */}
             {message.messageType === 'image' && message.imageData && (
@@ -171,8 +176,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     <main className={`flex flex-1 flex-col ${className}`}>
       <div
         ref={containerRef}
-        // MODIFIED LINE: Removed hardcoded 'p-4' and 'overflow-y-auto'
-        // These are now expected to come from the 'className' prop applied to the parent <main>
+        // These classes are now handled by the 'className' prop from chat.tsx
         className="flex-1 space-y-4" // 'flex-1' ensures it grows, 'space-y-4' provides spacing between messages
         style={{ scrollBehavior: 'smooth' }}
       >
