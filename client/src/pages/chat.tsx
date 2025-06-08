@@ -168,26 +168,25 @@ export default function ChatPage() {
             return;
         }
 
-        // Assign unique ID and initial status 'sent' immediately
-        const newMessage: ChatMessage = {
-            id: crypto.randomUUID(), // Generate a unique ID for the message
+        // --- MODIFICATION STARTS HERE ---
+        // IMPORTANT: We no longer optimistically add the message to roomState here.
+        // The message will be added to roomState only when the 'message-received' event
+        // comes back from the server, ensuring it has the canonical DB-generated ID and status.
+        // This prevents ID mismatches between client-generated and server-generated IDs.
+
+        // Send the message data to the server.
+        // The server will assign the official ID and timestamp upon saving.
+        socket.sendMessage({
             roomId: message.roomId,
             sender: message.sender,
             content: message.content,
             imageData: message.imageData,
             messageType: message.messageType,
-            timestamp: new Date(),
-            isSelf: true,
-            status: 'sent' // Set initial status to 'sent'
-        };
+        });
 
-        setRoomState(prev => ({
-            ...prev,
-            messages: [...prev.messages, newMessage].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-        }));
+        console.log(`[ChatPage] Sending message: ${message.content || '[Image]'}`);
+        // --- MODIFICATION ENDS HERE ---
 
-        // Send the full message object including ID and status to the server
-        socket.sendMessage(newMessage);
     }, [socket, addNotification]);
 
     const handleTypingStart = useCallback(() => {
@@ -230,9 +229,7 @@ export default function ChatPage() {
         // and the root element for the observer is available
         if (!isRoomModalOpen && roomState.username && observerRootRef.current) {
             const handleIntersection = (entries: IntersectionObserverEntry[]) => {
-                const messagesToMarkSeen: { roomId: string; messageIds: string[]; username: string }[] = [];
                 let hasNewSeenMessages = false;
-
                 const unseenMessageIds: string[] = [];
 
                 entries.forEach(entry => {
@@ -248,7 +245,6 @@ export default function ChatPage() {
                                 unseenMessageIds.push(message.id);
                                 hasNewSeenMessages = true;
                                 // Optimistically update local state to reflect seen status immediately
-                                // This update happens for ALL messages that become 'seen' in this intersection batch
                                 setRoomState(prev => ({
                                     ...prev,
                                     messages: prev.messages.map(msg =>
@@ -263,16 +259,12 @@ export default function ChatPage() {
                 });
 
                 if (hasNewSeenMessages && unseenMessageIds.length > 0) {
+                    // --- MODIFICATION STARTS HERE ---
                     // Emit a single event for all seen messages in this batch
-                    // The backend expects an array of objects for 'messages-seen'
-                    // For now, we'll send a single object for the current room
-                    messagesToMarkSeen.push({
-                        roomId: roomState.roomId,
-                        messageIds: unseenMessageIds,
-                        username: roomState.username
-                    });
-                    console.log('[ChatPage] Emitting messages-seen:', messagesToMarkSeen);
-                    socket.emitMessagesSeen(messagesToMarkSeen);
+                    // The backend expects an array of message IDs directly.
+                    console.log('[ChatPage] Emitting messages-seen for IDs:', unseenMessageIds);
+                    socket.emitMessagesSeen(unseenMessageIds);
+                    // --- MODIFICATION ENDS HERE ---
                 }
             };
 
@@ -355,7 +347,8 @@ export default function ChatPage() {
                 const historicalMessagesWithSelfFlag = data.messages.map(msg => ({
                     ...msg,
                     timestamp: new Date(msg.timestamp),
-                    isSelf: msg.sender === prev.username // Mark as self if sender matches current user
+                    isSelf: msg.sender === prev.username, // Mark as self if sender matches current user
+                    status: msg.status || 'sent' // Ensure status is set, default to 'sent'
                 }));
                 return {
                     ...prev,
@@ -375,20 +368,28 @@ export default function ChatPage() {
         });
 
         const unsubscribeMessageReceived = socket.on(SocketEvents.MessageReceived, (message) => {
-            console.log('Message received:', message);
+            console.log('[ChatPage] Message received from server:', message);
             setRoomState(prev => {
-                // Ensure message ID is present and unique before adding
-                if (!message.id || prev.messages.some(msg => msg.id === message.id)) {
-                    console.warn('Duplicate or invalid message ID received, skipping:', message);
+                // --- MODIFICATION STARTS HERE ---
+                // Find if this message already exists in our state (e.g., if it was a self-sent message
+                // that was optimistically added with a temporary ID, which we are no longer doing.
+                // Now, all messages are added from this event.)
+                // This logic ensures no duplicates if the server somehow re-emits a message.
+                if (prev.messages.some(msg => msg.id === message.id)) {
+                    console.warn(`[ChatPage] Duplicate message ID received, skipping: ${message.id}`);
                     return prev;
                 }
+                // --- MODIFICATION ENDS HERE ---
+
                 const receivedMessage: ChatMessage = {
                     ...message,
                     timestamp: new Date(message.timestamp),
                     isSelf: message.sender === prev.username,
                     // If it's not a message sent by current user, set to 'delivered' by default upon receipt
+                    // Otherwise, use the status provided by the server (which will be 'sent' initially)
                     status: message.sender !== prev.username ? 'delivered' : (message.status || 'sent')
                 };
+
                 return {
                     ...prev,
                     messages: [...prev.messages, receivedMessage].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
@@ -399,11 +400,7 @@ export default function ChatPage() {
             // This tells the sender's backend that the message reached the recipient.
             if (message.sender !== roomState.username) {
                 console.log(`[ChatPage] Emitting message-delivered for messageId: ${message.id}`);
-                socket.emitMessageDelivered({ // Call method from context
-                    roomId: message.roomId,
-                    messageId: message.id,
-                    recipientUsername: roomState.username // This client's username
-                });
+                socket.emitMessageDelivered({ messageId: message.id });
             }
         });
 
@@ -431,12 +428,20 @@ export default function ChatPage() {
         // IMPORTANT: Listener for message status updates from the server
         // This is what updates the sender's UI to show 'delivered' or 'seen' ticks.
         const unsubscribeMessageStatusUpdate = socket.on(SocketEvents.MessageStatusUpdate, (data) => {
-            console.log(`[ChatPage] Message status update received for ${data.messageId}: ${data.status}`);
+            console.log(`[ChatPage] Message status update received for ID(s): ${data.messageId || data.messageIds?.join(', ')} -> ${data.status}`);
             setRoomState(prev => ({
                 ...prev,
-                messages: prev.messages.map(msg =>
-                    msg.id === data.messageId ? { ...msg, status: data.status } : msg
-                )
+                messages: prev.messages.map(msg => {
+                    // Handle single messageId for 'delivered' or 'seen'
+                    if (data.messageId && msg.id === data.messageId) {
+                        return { ...msg, status: data.status };
+                    }
+                    // Handle multiple messageIds for 'seen' in a batch
+                    if (data.messageIds && data.messageIds.includes(msg.id)) {
+                        return { ...msg, status: data.status };
+                    }
+                    return msg;
+                })
             }));
         });
 
