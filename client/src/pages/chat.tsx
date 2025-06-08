@@ -299,7 +299,7 @@ export default function ChatPage() {
 
     return (
         // Outermost container: Full height, flex column, hide overflow to ensure scrolling is inside.
-        <div className="flex h-screen flex-col bg-gray-50 **overflow-hidden**">
+        <div className="flex h-screen flex-col bg-gray-50 overflow-hidden">
             {/* Room Join Modal */}
             <RoomJoinModal
                 isOpen={isRoomModalOpen}
@@ -325,9 +325,9 @@ export default function ChatPage() {
                     <ChatMessages
                         // flex-grow: Takes up remaining vertical space
                         // overflow-y-auto: Enables vertical scrolling
-                        // pt-[72px]: Increased top padding to clear the fixed header
+                        // pt-[68.8px]: Set padding-top based on the header's precise computed height
                         // pb-[96px]: Adds bottom padding to clear the fixed message input
-                        className="flex-grow overflow-y-auto pt-[72px] pb-[96px]"
+                        className="flex-grow overflow-y-auto pt-[68.8px] pb-[96px]" // Corrected pt value to 68.8px
                         messages={roomState.messages}
                         currentUsername={roomState.username}
                         typingUser={typingUser}
