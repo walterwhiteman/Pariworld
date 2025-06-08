@@ -325,9 +325,9 @@ export default function ChatPage() {
                     <ChatMessages
                         // flex-grow: Takes up remaining vertical space
                         // overflow-y-auto: Enables vertical scrolling
-                        // pt-[68.8px]: Set padding-top based on the header's precise computed height
+                        // pt-[65px]: Set padding-top based on the header's calculated height from code
                         // pb-[96px]: Adds bottom padding to clear the fixed message input
-                        className="flex-grow overflow-y-auto pt-[68.8px] pb-[96px]" // Corrected pt value to 68.8px
+                        className="flex-grow overflow-y-auto pt-[65px] pb-[96px]" // Corrected pt value to 65px
                         messages={roomState.messages}
                         currentUsername={roomState.username}
                         typingUser={typingUser}
