@@ -1,5 +1,5 @@
 // src/components/chat/ChatMessages.tsx
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo } from 'react'; // NEW: Import memo
 import { ChatMessage } from '@/types/chat';
 import { User, Check, CheckCheck } from 'lucide-react'; // NEW: Import Check and CheckCheck icons
 
@@ -8,14 +8,23 @@ interface ChatMessagesProps {
   currentUsername: string;
   typingUser?: string;
   onImageClick: (imageUrl: string) => void;
-  className?: string; // IMPORTANT: Ensure this prop is defined
+  className?: string;
+  // NEW: Callback to provide message element refs back to the parent (chat.tsx)
+  onMessageRender: (messageId: string, element: HTMLDivElement | null) => void;
 }
 
 /**
  * Chat messages container component that displays all messages in a scrollable area
  * Handles message rendering, auto-scrolling, and typing indicators
  */
-export function ChatMessages({ messages, currentUsername, typingUser, onImageClick, className }: ChatMessagesProps) {
+export const ChatMessages = memo(function ChatMessages({ // NEW: Wrap in memo
+  messages,
+  currentUsername,
+  typingUser,
+  onImageClick,
+  className,
+  onMessageRender // NEW: Destructure onMessageRender
+}: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +69,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     // System messages (join/leave notifications)
     if (isSystem) {
       return (
-        <div key={message.id} className="flex justify-center">
+        <div key={message.id} className="flex justify-center" ref={(el) => onMessageRender(message.id, el)}>
           <div className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
             {message.content}
           </div>
@@ -70,8 +79,10 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
 
     // Regular messages
     return (
+      // NEW: Attach ref to the message container for IntersectionObserver
       <div
         key={message.id}
+        ref={(el) => onMessageRender(message.id, el)}
         className={`flex items-start space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : ''}`}
       >
         {/* Avatar */}
@@ -91,7 +102,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
 
         {/* Message Content & Info Wrapper */}
         <div
-          className={`max-w-[75%] ${
+          className={`max-w-[75%] ${ // Changed max-w-* to max-w-[75%]
             isSelf ? 'ml-auto' : 'mr-auto'
           }`}
         >
@@ -131,7 +142,8 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
             {isSelf && (
               <>
                 <span className="text-xs text-gray-500">You</span>
-                {/* NEW: Message Status Icons */}
+                {/* Message Status Icons */}
+                {/* NEW: Conditional rendering for status icons */}
                 {message.status === 'sent' && (
                   <Check className="h-3 w-3 text-gray-400" />
                 )}
@@ -180,12 +192,10 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
   };
 
   return (
-    // Apply the passed 'className' prop here.
-    // This allows chat.tsx to control overflow and padding directly on this component.
     <main className={`flex flex-1 flex-col ${className}`}>
       <div
         ref={containerRef}
-        className="flex-1 space-y-4" // 'flex-1' ensures it grows, 'space-y-4' provides spacing between messages
+        className="flex-1 space-y-4"
         style={{ scrollBehavior: 'smooth' }}
       >
         {/* Render all messages */}
@@ -210,4 +220,4 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
       </div>
     </main>
   );
-}
+}); // NEW: Close memo
