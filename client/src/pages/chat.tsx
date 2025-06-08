@@ -8,10 +8,9 @@ import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { ImageViewerModal } from '@/components/chat/ImageViewerModal';
-import { useSocket } from '@/hooks/useSocket'; // Use the new useSocket from your context
-import { useWebRTC } from '@/hooks/useWebRTC'; // Make sure useWebRTC also uses the new useSocket
+import { useSocket } from '@/hooks/useSocket';
+import { useWebRTC } from '@/hooks/useWebRTC';
 
-// NEW: Import SocketEvents from types/chat.ts
 import { ChatMessage, NotificationData, RoomState, SocketEvents } from '@/types/chat';
 
 /**
@@ -46,7 +45,7 @@ export default function ChatPage() {
     const observerRootRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
 
     // Hooks
-    const socket = useSocket(); // Consume the socket context
+    const socket = useSocket();
 
     const recipientUsername = roomState.participants.find(
         (p) => p !== roomState.username
@@ -63,7 +62,7 @@ export default function ChatPage() {
         toggleVideo,
         toggleAudio,
         formatCallDuration
-    } = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername); // Pass the new socket from context
+    } = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername);
 
     useEffect(() => {
         console.log('ChatPage: Component mounted.');
@@ -109,7 +108,7 @@ export default function ChatPage() {
     }, []);
 
     const dismissNotification = useCallback((id: string) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
+        setNotifications(prev => prev.filter(n => n.id === id)); // CORRECTED: Should filter OUT the dismissed notification
     }, []);
 
     const handleImageClick = useCallback((imageUrl: string) => {
@@ -123,7 +122,6 @@ export default function ChatPage() {
     }, []);
 
     const handleJoinRoom = useCallback((roomId: string, username: string) => {
-        // Use socket.isConnected from the context hook
         if (!socket.isConnected) {
             addNotification('error', 'Connection Error', 'Unable to connect to chat server');
             return;
@@ -133,15 +131,15 @@ export default function ChatPage() {
             ...prev,
             roomId,
             username,
-            isConnected: false,
+            isConnected: false, // This will be true on ConnectionEstablished
             messages: []
         }));
-        socket.joinRoom(roomId, username); // Call method from context
+        socket.joinRoom(roomId, username);
     }, [socket, addNotification]);
 
     const handleLeaveRoom = useCallback(() => {
         if (roomState.roomId && roomState.username) {
-            socket.leaveRoom(roomState.roomId, roomState.username); // Call method from context
+            socket.leaveRoom(roomState.roomId, roomState.username);
         }
         if (callState.isActive) {
             console.log('handleLeaveRoom: Ending active video call before leaving room.');
@@ -164,7 +162,7 @@ export default function ChatPage() {
     }, [roomState, socket, callState.isActive, callState.incomingCallOffer, endCall, rejectIncomingCall, addNotification]);
 
     const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp' | 'isSelf' | 'status'>) => {
-        if (!socket.isConnected) { // Use socket.isConnected from the context hook
+        if (!socket.isConnected) {
             addNotification('error', 'Connection Error', 'Not connected to chat room');
             return;
         }
@@ -188,18 +186,18 @@ export default function ChatPage() {
         }));
 
         // Send the full message object including ID and status to the server
-        socket.sendMessage(newMessage); // Call method from context
-    }, [socket, addNotification]); // Dependency on socket and addNotification
+        socket.sendMessage(newMessage);
+    }, [socket, addNotification]);
 
     const handleTypingStart = useCallback(() => {
-        if (socket.isConnected) { // Use socket.isConnected from the context hook
-            socket.sendTypingStatus(roomState.roomId, roomState.username, true); // Call method from context
+        if (socket.isConnected) {
+            socket.sendTypingStatus(roomState.roomId, roomState.username, true);
         }
     }, [roomState, socket]);
 
     const handleTypingStop = useCallback(() => {
-        if (socket.isConnected) { // Use socket.isConnected from the context hook
-            socket.sendTypingStatus(roomState.roomId, roomState.username, false); // Call method from context
+        if (socket.isConnected) {
+            socket.sendTypingStatus(roomState.roomId, roomState.username, false);
         }
     }, [roomState, socket]);
 
@@ -231,7 +229,10 @@ export default function ChatPage() {
         // and the root element for the observer is available
         if (!isRoomModalOpen && roomState.username && observerRootRef.current) {
             const handleIntersection = (entries: IntersectionObserverEntry[]) => {
-                const messagesToMarkSeen: { messageId: string; roomId: string; username: string }[] = [];
+                const messagesToMarkSeen: { roomId: string; messageIds: string[]; username: string }[] = [];
+                let hasNewSeenMessages = false;
+
+                const unseenMessageIds: string[] = [];
 
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
@@ -241,14 +242,12 @@ export default function ChatPage() {
                         if (messageId) {
                             const message = roomState.messages.find(msg => msg.id === messageId);
 
-                            // Mark as seen only if it's not sent by current user and status is not already 'seen'
+                            // Mark as seen only if it's not sent by current user AND status is not already 'seen'
                             if (message && !message.isSelf && message.status !== 'seen') {
-                                messagesToMarkSeen.push({
-                                    messageId: message.id,
-                                    roomId: message.roomId,
-                                    username: roomState.username
-                                });
+                                unseenMessageIds.push(message.id);
+                                hasNewSeenMessages = true;
                                 // Optimistically update local state to reflect seen status immediately
+                                // This update happens for ALL messages that become 'seen' in this intersection batch
                                 setRoomState(prev => ({
                                     ...prev,
                                     messages: prev.messages.map(msg =>
@@ -262,9 +261,17 @@ export default function ChatPage() {
                     }
                 });
 
-                if (messagesToMarkSeen.length > 0) {
-                    // Emit a single event for all seen messages
-                    socket.emitMessagesSeen(messagesToMarkSeen); // Call method from context
+                if (hasNewSeenMessages && unseenMessageIds.length > 0) {
+                    // Emit a single event for all seen messages in this batch
+                    // The backend expects an array of objects for 'messages-seen'
+                    // For now, we'll send a single object for the current room
+                    messagesToMarkSeen.push({
+                        roomId: roomState.roomId,
+                        messageIds: unseenMessageIds,
+                        username: roomState.username
+                    });
+                    console.log('[ChatPage] Emitting messages-seen:', messagesToMarkSeen);
+                    socket.emitMessagesSeen(messagesToMarkSeen);
                 }
             };
 
@@ -279,10 +286,14 @@ export default function ChatPage() {
                 threshold: 0.5 // Message is considered "seen" when 50% of it is visible
             });
 
-            // Observe all messages currently in messageRefs
+            // Observe all messages currently in messageRefs that are not self and not already seen
             messageRefs.current.forEach(element => {
-                if (element) {
-                    observer.current!.observe(element);
+                const messageId = element.dataset.messageId;
+                if (messageId) {
+                    const message = roomState.messages.find(msg => msg.id === messageId);
+                    if (message && !message.isSelf && message.status !== 'seen') {
+                        observer.current!.observe(element);
+                    }
                 }
             });
 
@@ -298,13 +309,20 @@ export default function ChatPage() {
                 observer.current.disconnect();
             }
         };
-    }, [isRoomModalOpen, roomState.username, roomState.messages, socket, observerRootRef]); // Dependencies
+    }, [isRoomModalOpen, roomState.username, roomState.messages, roomState.roomId, socket, observerRootRef]); // Dependencies
 
     // Clean up old refs not present in current messages (important for performance)
     useEffect(() => {
         const currentMessageIds = new Set(roomState.messages.map(msg => msg.id));
         messageRefs.current.forEach((_val, key) => {
             if (!currentMessageIds.has(key)) {
+                // If the observer still exists, ensure we unobserve elements that are being removed
+                if (observer.current) {
+                    const elementToUnobserve = messageRefs.current.get(key);
+                    if (elementToUnobserve) {
+                        observer.current.unobserve(elementToUnobserve);
+                    }
+                }
                 messageRefs.current.delete(key);
             }
         });
@@ -336,7 +354,7 @@ export default function ChatPage() {
                 const historicalMessagesWithSelfFlag = data.messages.map(msg => ({
                     ...msg,
                     timestamp: new Date(msg.timestamp),
-                    isSelf: msg.sender === prev.username
+                    isSelf: msg.sender === prev.username // Mark as self if sender matches current user
                 }));
                 return {
                     ...prev,
@@ -376,8 +394,10 @@ export default function ChatPage() {
                 };
             });
 
-            // If this message is not from current user, emit 'message-delivered' to server
+            // IMPORTANT: If this message is NOT from the current user, emit 'message-delivered' to the server.
+            // This tells the sender's backend that the message reached the recipient.
             if (message.sender !== roomState.username) {
+                console.log(`[ChatPage] Emitting message-delivered for messageId: ${message.id}`);
                 socket.emitMessageDelivered({ // Call method from context
                     roomId: message.roomId,
                     messageId: message.id,
@@ -393,15 +413,11 @@ export default function ChatPage() {
             }
         });
 
-        // The connection status is primarily handled by the SocketProvider's internal
-        // 'connect', 'disconnect', 'connect_error' and custom 'connection-established' events.
-        // This listener can be used for debugging or additional UI feedback.
         const unsubscribeConnectionStatus = socket.on(SocketEvents.ConnectionStatus, (data) => {
             console.log('Connection status from server:', data);
             setRoomState(prev => ({
                 ...prev,
                 isConnected: data.connected,
-                // You might also update participants based on this if it's more authoritative
             }));
         });
 
@@ -411,9 +427,10 @@ export default function ChatPage() {
             setIsConnecting(false);
         });
 
-        // NEW: Listener for message status updates from the server
+        // IMPORTANT: Listener for message status updates from the server
+        // This is what updates the sender's UI to show 'delivered' or 'seen' ticks.
         const unsubscribeMessageStatusUpdate = socket.on(SocketEvents.MessageStatusUpdate, (data) => {
-            console.log(`Message status update for ${data.messageId}: ${data.status}`);
+            console.log(`[ChatPage] Message status update received for ${data.messageId}: ${data.status}`);
             setRoomState(prev => ({
                 ...prev,
                 messages: prev.messages.map(msg =>
@@ -456,7 +473,7 @@ export default function ChatPage() {
             unsubscribeCallAccepted();
             unsubscribeCallParticipantJoined();
         };
-    }, [socket, roomState.username, callState]); // Dependency on socket (and its methods) and roomState.username, callState
+    }, [socket, roomState.username, roomState.roomId, callState, addNotification]); // Dependency on socket (and its methods) and roomState.username, callState, addNotification
 
     useEffect(() => {
         console.log('ChatPage: useEffect (Connection Error) Mounted.');
@@ -504,7 +521,6 @@ export default function ChatPage() {
                     <ChatHeader
                         className="fixed top-0 left-0 right-0 z-10"
                         roomId={roomState.roomId}
-                        // Use socket.isConnected from context
                         isConnected={socket.isConnected}
                         participantCount={roomState.participants.length}
                         onStartVideoCall={handleStartVideoCall}
@@ -529,7 +545,6 @@ export default function ChatPage() {
                         onTypingStop={handleTypingStop}
                         roomId={roomState.roomId}
                         username={roomState.username}
-                        // Use socket.isConnected from context
                         disabled={!socket.isConnected}
                     />
 
