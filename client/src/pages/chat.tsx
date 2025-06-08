@@ -321,23 +321,19 @@ export default function ChatPage() {
                         onLeaveRoom={handleLeaveRoom}
                     />
 
-                    {---}
-
                     {/* Chat Messages Area - This is the scrollable part */}
                     <ChatMessages
                         // flex-grow: Takes up remaining vertical space
                         // overflow-y-auto: Enables vertical scrolling
-                        // pt-[68.8px]: Set padding-top based on the header's calculated height from code (was 100px, reverted to 68.8px)
+                        // pt-[68.8px]: Set padding-top based on the header's calculated height from code
                         // pb-[96px]: Adds bottom padding to clear the fixed message input
                         // px-4: Adds horizontal padding to prevent messages from touching the sides
-                        className="flex-grow overflow-y-auto pt-[68.8px] pb-[96px] px-4" // MODIFIED LINE
+                        className="flex-grow overflow-y-auto pt-[68.8px] pb-[96px] px-4" // Corrected: Added px-4
                         messages={roomState.messages}
                         currentUsername={roomState.username}
                         typingUser={typingUser}
                         onImageClick={handleImageClick}
                     />
-
-                    {---}
 
                     {/* Message Input - Fixed at the bottom */}
                     <MessageInput
