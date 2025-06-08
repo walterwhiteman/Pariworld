@@ -1,6 +1,6 @@
 // src/pages/chat.tsx
 
-import { useState, useCallback, useEffect, useRef } from 'react'; // NEW: Import useRef
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { RoomJoinModal } from '@/components/chat/RoomJoinModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { ChatMessages } from '@/components/chat/ChatMessages';
@@ -8,10 +8,11 @@ import { MessageInput } from '@/components/chat/MessageInput';
 import { VideoCallModal } from '@/components/chat/VideoCallModal';
 import { NotificationToast } from '@/components/chat/NotificationToast';
 import { ImageViewerModal } from '@/components/chat/ImageViewerModal';
-import { useSocket } from '@/hooks/useSocket';
-import { useWebRTC } from '@/hooks/useWebRTC';
+import { useSocket } from '@/hooks/useSocket'; // Use the new useSocket from your context
+import { useWebRTC } from '@/hooks/useWebRTC'; // Make sure useWebRTC also uses the new useSocket
 
-import { ChatMessage, NotificationData, RoomState } from '@/types/chat';
+// NEW: Import SocketEvents from types/chat.ts
+import { ChatMessage, NotificationData, RoomState, SocketEvents } from '@/types/chat';
 
 /**
  * Main chat page component that orchestrates the entire chat application
@@ -39,12 +40,13 @@ export default function ChatPage() {
     const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
     const [currentViewingImage, setCurrentViewingImage] = useState<string | null>(null);
 
-    // NEW: Refs for messages to track visibility for "seen" status
+    // Refs for messages to track visibility for "seen" status
     const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
     const observer = useRef<IntersectionObserver | null>(null);
+    const observerRootRef = useRef<HTMLDivElement>(null); // Ref for the scrollable container
 
     // Hooks
-    const socket = useSocket();
+    const socket = useSocket(); // Consume the socket context
 
     const recipientUsername = roomState.participants.find(
         (p) => p !== roomState.username
@@ -61,7 +63,7 @@ export default function ChatPage() {
         toggleVideo,
         toggleAudio,
         formatCallDuration
-    } = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername);
+    } = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername); // Pass the new socket from context
 
     useEffect(() => {
         console.log('ChatPage: Component mounted.');
@@ -121,6 +123,7 @@ export default function ChatPage() {
     }, []);
 
     const handleJoinRoom = useCallback((roomId: string, username: string) => {
+        // Use socket.isConnected from the context hook
         if (!socket.isConnected) {
             addNotification('error', 'Connection Error', 'Unable to connect to chat server');
             return;
@@ -133,12 +136,12 @@ export default function ChatPage() {
             isConnected: false,
             messages: []
         }));
-        socket.joinRoom(roomId, username);
+        socket.joinRoom(roomId, username); // Call method from context
     }, [socket, addNotification]);
 
     const handleLeaveRoom = useCallback(() => {
         if (roomState.roomId && roomState.username) {
-            socket.leaveRoom(roomState.roomId, roomState.username);
+            socket.leaveRoom(roomState.roomId, roomState.username); // Call method from context
         }
         if (callState.isActive) {
             console.log('handleLeaveRoom: Ending active video call before leaving room.');
@@ -161,12 +164,12 @@ export default function ChatPage() {
     }, [roomState, socket, callState.isActive, callState.incomingCallOffer, endCall, rejectIncomingCall, addNotification]);
 
     const handleSendMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp' | 'isSelf' | 'status'>) => {
-        if (!roomState.isConnected) {
+        if (!socket.isConnected) { // Use socket.isConnected from the context hook
             addNotification('error', 'Connection Error', 'Not connected to chat room');
             return;
         }
 
-        // NEW: Assign unique ID and initial status 'sent' immediately
+        // Assign unique ID and initial status 'sent' immediately
         const newMessage: ChatMessage = {
             id: crypto.randomUUID(), // Generate a unique ID for the message
             roomId: message.roomId,
@@ -184,26 +187,28 @@ export default function ChatPage() {
             messages: [...prev.messages, newMessage].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
         }));
 
-        // Send the full message object including ID to the server
-        socket.sendMessage(newMessage);
-    }, [roomState.isConnected, socket, addNotification]);
+        // Send the full message object including ID and status to the server
+        socket.sendMessage(newMessage); // Call method from context
+    }, [socket, addNotification]); // Dependency on socket and addNotification
 
     const handleTypingStart = useCallback(() => {
-        if (roomState.isConnected) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, true);
+        if (socket.isConnected) { // Use socket.isConnected from the context hook
+            socket.sendTypingStatus(roomState.roomId, roomState.username, true); // Call method from context
         }
     }, [roomState, socket]);
 
     const handleTypingStop = useCallback(() => {
-        if (roomState.isConnected) {
-            socket.sendTypingStatus(roomState.roomId, roomState.username, false);
+        if (socket.isConnected) { // Use socket.isConnected from the context hook
+            socket.sendTypingStatus(roomState.roomId, roomState.username, false); // Call method from context
         }
     }, [roomState, socket]);
 
-    // NEW: Callback to get message element refs from ChatMessages component
+    // Callback to get message element refs from ChatMessages component
     const handleMessageRender = useCallback((messageId: string, element: HTMLDivElement | null) => {
         if (element) {
             messageRefs.current.set(messageId, element);
+            // Attach data-message-id for easy lookup by IntersectionObserver
+            element.setAttribute('data-message-id', messageId);
             // If observer exists, observe the new element
             if (observer.current) {
                 observer.current.observe(element);
@@ -211,26 +216,29 @@ export default function ChatPage() {
         } else {
             // Clean up old element reference if it's unmounting
             if (messageRefs.current.has(messageId) && observer.current) {
-                observer.current.unobserve(messageRefs.current.get(messageId)!);
+                const elementToUnobserve = messageRefs.current.get(messageId);
+                if (elementToUnobserve) {
+                    observer.current.unobserve(elementToUnobserve);
+                }
             }
             messageRefs.current.delete(messageId);
         }
     }, []);
 
-    // NEW: Effect for IntersectionObserver to detect "seen" messages
+    // Effect for IntersectionObserver to detect "seen" messages
     useEffect(() => {
         // Only initialize observer if chat is active (not in modal) and currentUsername exists
-        if (!isRoomModalOpen && roomState.username) {
+        // and the root element for the observer is available
+        if (!isRoomModalOpen && roomState.username && observerRootRef.current) {
             const handleIntersection = (entries: IntersectionObserverEntry[]) => {
                 const messagesToMarkSeen: { messageId: string; roomId: string; username: string }[] = [];
 
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
                         const messageElement = entry.target as HTMLDivElement;
-                        const messageId = messageElement.dataset.messageId; // We need to store messageId on the element
+                        const messageId = messageElement.dataset.messageId;
 
                         if (messageId) {
-                            // Find the message in state to check its sender and current status
                             const message = roomState.messages.find(msg => msg.id === messageId);
 
                             // Mark as seen only if it's not sent by current user and status is not already 'seen'
@@ -240,7 +248,7 @@ export default function ChatPage() {
                                     roomId: message.roomId,
                                     username: roomState.username
                                 });
-                                // Optimistically update local state
+                                // Optimistically update local state to reflect seen status immediately
                                 setRoomState(prev => ({
                                     ...prev,
                                     messages: prev.messages.map(msg =>
@@ -256,7 +264,7 @@ export default function ChatPage() {
 
                 if (messagesToMarkSeen.length > 0) {
                     // Emit a single event for all seen messages
-                    socket.emitMessagesSeen(messagesToMarkSeen);
+                    socket.emitMessagesSeen(messagesToMarkSeen); // Call method from context
                 }
             };
 
@@ -266,44 +274,34 @@ export default function ChatPage() {
             }
 
             observer.current = new IntersectionObserver(handleIntersection, {
-                root: document.querySelector('.chat-messages-container'), // The scrollable container
+                root: observerRootRef.current, // Use the ref for the scrollable container
                 rootMargin: '0px',
                 threshold: 0.5 // Message is considered "seen" when 50% of it is visible
             });
 
-            // Observe all existing messages
+            // Observe all messages currently in messageRefs
             messageRefs.current.forEach(element => {
                 if (element) {
-                    // Attach data-message-id for easy lookup
-                    const messageId = element.getAttribute('data-message-id') || '';
-                    if (!messageId) {
-                        // This means renderMessage didn't set the ID. Let's make sure it does.
-                        // For now, try to find the message by its ref (less robust)
-                        const message = roomState.messages.find(msg => messageRefs.current.get(msg.id) === element);
-                        if (message) {
-                             element.setAttribute('data-message-id', message.id);
-                        }
-                    }
                     observer.current!.observe(element);
                 }
             });
 
         } else if (observer.current) {
-            // Disconnect observer if modal is open or username is not set
+            // Disconnect observer if modal is open or username is not set, or root element is not ready
             observer.current.disconnect();
             observer.current = null;
         }
 
+        // Cleanup observer on component unmount or when dependencies change
         return () => {
             if (observer.current) {
                 observer.current.disconnect();
             }
         };
-    }, [isRoomModalOpen, roomState.username, roomState.messages, socket]); // Re-run when messages change or room status changes
+    }, [isRoomModalOpen, roomState.username, roomState.messages, socket, observerRootRef]); // Dependencies
 
-    // Update messageRefs when messages change
+    // Clean up old refs not present in current messages (important for performance)
     useEffect(() => {
-        // Clean up old refs not present in current messages
         const currentMessageIds = new Set(roomState.messages.map(msg => msg.id));
         messageRefs.current.forEach((_val, key) => {
             if (!currentMessageIds.has(key)) {
@@ -315,21 +313,24 @@ export default function ChatPage() {
 
     useEffect(() => {
         console.log('ChatPage: useEffect (Socket Listeners) Mounted.');
+        // Ensure socket object is available before setting up listeners
         if (!socket.on) {
             console.warn('ChatPage: Socket instance not ready for event listeners.');
             return;
         }
-        const unsubscribeRoomJoined = socket.on('room-joined', (data: { roomId: string; participants: string[] }) => {
+
+        const unsubscribeRoomJoined = socket.on(SocketEvents.RoomJoined, (data) => {
             console.log('Room joined successfully or participants updated:', data);
             setRoomState(prev => ({
                 ...prev,
-                isConnected: true,
+                isConnected: true, // This is set by the connection-established event, but good to ensure
                 participants: data.participants
             }));
             setIsRoomModalOpen(false);
             setIsConnecting(false);
         });
-        const unsubscribeMessageHistory = socket.on('message-history', (data: { roomId: string; messages: ChatMessage[] }) => {
+
+        const unsubscribeMessageHistory = socket.on(SocketEvents.MessageHistory, (data) => {
             console.log('Received message history:', data.messages);
             setRoomState(prev => {
                 const historicalMessagesWithSelfFlag = data.messages.map(msg => ({
@@ -343,7 +344,8 @@ export default function ChatPage() {
                 };
             });
         });
-        const unsubscribeRoomLeft = socket.on('room-left', (data: { roomId: string; username: string }) => {
+
+        const unsubscribeRoomLeft = socket.on(SocketEvents.RoomLeft, (data) => {
             console.log('User left room:', data);
             if (data.username !== roomState.username) {
                 setRoomState(prev => ({
@@ -353,18 +355,20 @@ export default function ChatPage() {
             }
         });
 
-        // MODIFIED: message-received now handles emitting message-delivered
-        const unsubscribeMessageReceived = socket.on('message-received', (message: ChatMessage) => {
+        const unsubscribeMessageReceived = socket.on(SocketEvents.MessageReceived, (message) => {
             console.log('Message received:', message);
             setRoomState(prev => {
-                if (prev.messages.some(msg => msg.id === message.id)) {
-                    return prev; // Avoid duplicate messages
+                // Ensure message ID is present and unique before adding
+                if (!message.id || prev.messages.some(msg => msg.id === message.id)) {
+                    console.warn('Duplicate or invalid message ID received, skipping:', message);
+                    return prev;
                 }
                 const receivedMessage: ChatMessage = {
                     ...message,
                     timestamp: new Date(message.timestamp),
                     isSelf: message.sender === prev.username,
-                    status: message.isSelf ? message.status : 'delivered' // Set to delivered if it's not self-sent initially
+                    // If it's not a message sent by current user, set to 'delivered' by default upon receipt
+                    status: message.sender !== prev.username ? 'delivered' : (message.status || 'sent')
                 };
                 return {
                     ...prev,
@@ -372,9 +376,9 @@ export default function ChatPage() {
                 };
             });
 
-            // NEW: If this message is not from current user, emit 'message-delivered' to server
+            // If this message is not from current user, emit 'message-delivered' to server
             if (message.sender !== roomState.username) {
-                socket.emitMessageDelivered({
+                socket.emitMessageDelivered({ // Call method from context
                     roomId: message.roomId,
                     messageId: message.id,
                     recipientUsername: roomState.username // This client's username
@@ -382,29 +386,33 @@ export default function ChatPage() {
             }
         });
 
-        const unsubscribeUserTyping = socket.on('user-typing', (data: { username: string; isTyping: boolean }) => {
+        const unsubscribeUserTyping = socket.on(SocketEvents.UserTyping, (data) => {
             console.log('User typing:', data);
             if (data.username !== roomState.username) {
                 setTypingUser(data.isTyping ? data.username : undefined);
             }
         });
-        const unsubscribeConnectionStatus = socket.on('connection-status', (data: { connected: boolean; participantCount: number, username: string }) => {
-            console.log('Connection status:', data);
-            setRoomState(prev => {
-                return {
-                    ...prev,
-                    isConnected: data.connected,
-                };
-            });
+
+        // The connection status is primarily handled by the SocketProvider's internal
+        // 'connect', 'disconnect', 'connect_error' and custom 'connection-established' events.
+        // This listener can be used for debugging or additional UI feedback.
+        const unsubscribeConnectionStatus = socket.on(SocketEvents.ConnectionStatus, (data) => {
+            console.log('Connection status from server:', data);
+            setRoomState(prev => ({
+                ...prev,
+                isConnected: data.connected,
+                // You might also update participants based on this if it's more authoritative
+            }));
         });
-        const unsubscribeError = socket.on('error', (data: { message: string }) => {
+
+        const unsubscribeError = socket.on(SocketEvents.Error, (data) => {
             console.error('Socket error:', data);
             addNotification('error', 'Error', data.message);
             setIsConnecting(false);
         });
 
         // NEW: Listener for message status updates from the server
-        const unsubscribeMessageStatusUpdate = socket.on('message-status-update', (data: { messageId: string; status: 'delivered' | 'seen' }) => {
+        const unsubscribeMessageStatusUpdate = socket.on(SocketEvents.MessageStatusUpdate, (data) => {
             console.log(`Message status update for ${data.messageId}: ${data.status}`);
             setRoomState(prev => ({
                 ...prev,
@@ -413,6 +421,17 @@ export default function ChatPage() {
                 )
             }));
         });
+
+        // WebRTC event listeners (passing through to useWebRTC)
+        const unsubscribeCallOffer = socket.on(SocketEvents.CallOffer, (data) => { callState.onCallOffer(data); });
+        const unsubscribeCallAnswer = socket.on(SocketEvents.CallAnswer, (data) => { callState.onCallAnswer(data); });
+        const unsubscribeIceCandidate = socket.on(SocketEvents.IceCandidate, (data) => { callState.onIceCandidate(data); });
+        const unsubscribeCallRejected = socket.on(SocketEvents.CallRejected, (data) => { callState.onCallRejected(data); });
+        const unsubscribeCallEnded = socket.on(SocketEvents.CallEnded, (data) => { callState.onCallEnded(data); });
+        const unsubscribeCallBusy = socket.on(SocketEvents.CallBusy, (data) => { callState.onCallBusy(data); });
+        const unsubscribeCallRinging = socket.on(SocketEvents.CallRinging, (data) => { callState.onCallRinging(data); });
+        const unsubscribeCallAccepted = socket.on(SocketEvents.CallAccepted, (data) => { callState.onCallAccepted(data); });
+        const unsubscribeCallParticipantJoined = socket.on(SocketEvents.CallParticipantJoined, (data) => { callState.onCallParticipantJoined(data); });
 
 
         return () => {
@@ -424,12 +443,24 @@ export default function ChatPage() {
             unsubscribeUserTyping();
             unsubscribeConnectionStatus();
             unsubscribeError();
-            unsubscribeMessageStatusUpdate(); // NEW: Cleanup for status update listener
+            unsubscribeMessageStatusUpdate();
+
+            // WebRTC cleanup
+            unsubscribeCallOffer();
+            unsubscribeCallAnswer();
+            unsubscribeIceCandidate();
+            unsubscribeCallRejected();
+            unsubscribeCallEnded();
+            unsubscribeCallBusy();
+            unsubscribeCallRinging();
+            unsubscribeCallAccepted();
+            unsubscribeCallParticipantJoined();
         };
-    }, [socket, roomState.username]); // Dependency on roomState.username to ensure listener context is fresh for 'message-delivered'
+    }, [socket, roomState.username, callState]); // Dependency on socket (and its methods) and roomState.username, callState
 
     useEffect(() => {
         console.log('ChatPage: useEffect (Connection Error) Mounted.');
+        // Use socket.connectionError from the context hook
         if (socket.connectionError) {
             addNotification('error', 'Connection Failed', socket.connectionError);
             setIsConnecting(false);
@@ -438,6 +469,7 @@ export default function ChatPage() {
             console.log('ChatPage: useEffect (Connection Error) Cleanup.');
         }
     }, [socket.connectionError, addNotification]);
+
 
     const handleStartVideoCall = useCallback(() => {
         if (!recipientUsername) {
@@ -472,20 +504,22 @@ export default function ChatPage() {
                     <ChatHeader
                         className="fixed top-0 left-0 right-0 z-10"
                         roomId={roomState.roomId}
-                        isConnected={roomState.isConnected}
+                        // Use socket.isConnected from context
+                        isConnected={socket.isConnected}
                         participantCount={roomState.participants.length}
                         onStartVideoCall={handleStartVideoCall}
                         onLeaveRoom={handleLeaveRoom}
                     />
 
-                    {/* NEW: Added chat-messages-container class for IntersectionObserver root */}
+                    {/* Attach observerRootRef to the scrollable container */}
                     <ChatMessages
+                        ref={observerRootRef} // This ref needs to be forwarded in ChatMessages.tsx
                         className="flex-grow overflow-y-auto pt-[68.8px] pb-[96px] px-4 chat-messages-container"
                         messages={roomState.messages}
                         currentUsername={roomState.username}
                         typingUser={typingUser}
                         onImageClick={handleImageClick}
-                        onMessageRender={handleMessageRender} // NEW: Pass the ref callback
+                        onMessageRender={handleMessageRender}
                     />
 
                     <MessageInput
@@ -495,7 +529,8 @@ export default function ChatPage() {
                         onTypingStop={handleTypingStop}
                         roomId={roomState.roomId}
                         username={roomState.username}
-                        disabled={!roomState.isConnected}
+                        // Use socket.isConnected from context
+                        disabled={!socket.isConnected}
                     />
 
                     <VideoCallModal
