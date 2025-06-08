@@ -1,7 +1,7 @@
 // src/components/chat/ChatMessages.tsx
 import { useEffect, useRef } from 'react';
 import { ChatMessage } from '@/types/chat';
-import { User } from 'lucide-react';
+import { User, Check, CheckCheck } from 'lucide-react'; // NEW: Import Check and CheckCheck icons
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -15,7 +15,7 @@ interface ChatMessagesProps {
  * Chat messages container component that displays all messages in a scrollable area
  * Handles message rendering, auto-scrolling, and typing indicators
  */
-export function ChatMessages({ messages, currentUsername, typingUser, onImageClick, className }: ChatMessagesProps) { // IMPORTANT: Add className to destructuring
+export function ChatMessages({ messages, currentUsername, typingUser, onImageClick, className }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +72,6 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     return (
       <div
         key={message.id}
-        // Outer message wrapper. 'flex-row-reverse' for self moves avatar to the right.
         className={`flex items-start space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : ''}`}
       >
         {/* Avatar */}
@@ -91,10 +90,9 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
         </div>
 
         {/* Message Content & Info Wrapper */}
-        {/* MODIFIED: Changed max-w-* to max-w-[75%] to ensure a consistent gap on the opposite side. */}
         <div
-          className={`max-w-[60%] ${ // THIS IS THE MODIFIED LINE
-            isSelf ? 'ml-auto' : 'mr-auto' // 'ml-auto' pushes it to the right for self, 'mr-auto' pushes it to the left for others
+          className={`max-w-[75%] ${
+            isSelf ? 'ml-auto' : 'mr-auto'
           }`}
         >
           <div
@@ -102,7 +100,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
               isSelf
                 ? 'bg-blue-600 text-white rounded-2xl rounded-tr-md'
                 : 'bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-tl-md'
-            } px-4 py-2`} // The actual message bubble
+            } px-4 py-2`}
           >
             {/* Image Message */}
             {message.messageType === 'image' && message.imageData && (
@@ -131,7 +129,19 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
               {formatTime(message.timestamp)}
             </span>
             {isSelf && (
-              <span className="text-xs text-gray-500">You</span>
+              <>
+                <span className="text-xs text-gray-500">You</span>
+                {/* NEW: Message Status Icons */}
+                {message.status === 'sent' && (
+                  <Check className="h-3 w-3 text-gray-400" />
+                )}
+                {message.status === 'delivered' && (
+                  <CheckCheck className="h-3 w-3 text-gray-400" />
+                )}
+                {message.status === 'seen' && (
+                  <CheckCheck className="h-3 w-3 text-blue-500" />
+                )}
+              </>
             )}
           </div>
         </div>
@@ -175,7 +185,6 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     <main className={`flex flex-1 flex-col ${className}`}>
       <div
         ref={containerRef}
-        // These classes are now handled by the 'className' prop from chat.tsx
         className="flex-1 space-y-4" // 'flex-1' ensures it grows, 'space-y-4' provides spacing between messages
         style={{ scrollBehavior: 'smooth' }}
       >
