@@ -259,12 +259,17 @@ export default function ChatPage() {
                 });
 
                 if (hasNewSeenMessages && unseenMessageIds.length > 0) {
-                    // --- MODIFICATION STARTS HERE ---
+                    // --- FIX STARTS HERE ---
                     // Emit a single event for all seen messages in this batch
-                    // The backend expects an array of message IDs directly.
+                    // The backend expects an array of objects like:
+                    // [{ roomId: string; messageIds: string[]; username: string }]
                     console.log('[ChatPage] Emitting messages-seen for IDs:', unseenMessageIds);
-                    socket.emitMessagesSeen(unseenMessageIds);
-                    // --- MODIFICATION ENDS HERE ---
+                    socket.emitMessagesSeen([{
+                        roomId: roomState.roomId,
+                        messageIds: unseenMessageIds,
+                        username: roomState.username
+                    }]);
+                    // --- FIX ENDS HERE ---
                 }
             };
 
@@ -398,9 +403,11 @@ export default function ChatPage() {
 
             // IMPORTANT: If this message is NOT from the current user, emit 'message-delivered' to the server.
             // This tells the sender's backend that the message reached the recipient.
+            // FIX: Ensure this is also sending the correct object for `emitMessageDelivered`
             if (message.sender !== roomState.username) {
                 console.log(`[ChatPage] Emitting message-delivered for messageId: ${message.id}`);
-                socket.emitMessageDelivered({ messageId: message.id });
+                // Ensure payload matches useSocket.ts and server expectations
+                socket.emitMessageDelivered({ messageId: message.id, roomId: roomState.roomId, recipientUsername: roomState.username });
             }
         });
 
@@ -565,6 +572,8 @@ export default function ChatPage() {
                         formatCallDuration={formatCallDuration}
                         onAcceptCall={acceptIncomingCall}
                         onRejectCall={rejectIncomingCall}
+                        onToggleCamera={toggleVideo} // Ensure this is mapped correctly
+                        onToggleMic={toggleAudio} // Ensure this is mapped correctly
                     />
                 </>
             )}
