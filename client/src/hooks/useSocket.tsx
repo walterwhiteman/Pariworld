@@ -20,6 +20,7 @@ interface SocketContextType {
     sendMessage: (message: ChatMessage) => void;
     sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
     // NEW: Message status acknowledgment methods
+    // FIX: Changed data structure for emitMessageDelivered to expect a single object
     emitMessageDelivered: (data: { roomId: string; messageId: string; recipientUsername: string }) => void;
     emitMessagesSeen: (data: { roomId: string; messageIds: string[]; username: string }[]) => void;
 
@@ -206,7 +207,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // NEW: Emit 'message-delivered' acknowledgment
     const emitMessageDelivered = useCallback((data: { roomId: string; messageId: string; recipientUsername: string }) => {
-        emit(SocketEvents.MessageDelivered, data.roomId, data.messageId, data.recipientUsername);
+        // FIX: Sending a single object as the payload to match the server's expected destructuring
+        emit(SocketEvents.MessageDelivered, { messageId: data.messageId, roomId: data.roomId, recipientUsername: data.recipientUsername });
     }, [emit]);
 
     // NEW: Emit 'messages-seen' acknowledgment (can be multiple)
