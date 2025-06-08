@@ -102,7 +102,7 @@ export const ChatMessages = memo(function ChatMessages({ // NEW: Wrap in memo
 
         {/* Message Content & Info Wrapper */}
         <div
-          className={`max-w-[75%] ${ // Changed max-w-* to max-w-[75%]
+          className={`max-w-[60%] ${ // Changed max-w-* to max-w-[75%]
             isSelf ? 'ml-auto' : 'mr-auto'
           }`}
         >
