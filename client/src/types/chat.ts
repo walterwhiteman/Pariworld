@@ -61,22 +61,23 @@ export enum SocketEvents {
 // Socket event HANDLERS (as an interface for type checking)
 export interface SocketEventHandlers {
     // Client emits (to server)
-    [SocketEvents.JoinRoom]: (roomId: string, username: string, callback: (response: { success: boolean; message?: string }) => void) => void; // MODIFIED: Simplified to match useSocket signature
+    // MODIFIED: join-room now expects a single data object as the first argument
+    [SocketEvents.JoinRoom]: (data: { roomId: string; username: string }, callback: (response: { success: boolean; message?: string }) => void) => void;
     [SocketEvents.LeaveRoom]: (roomId: string, username: string) => void;
     [SocketEvents.SendMessage]: (message: ChatMessage) => void; // MODIFIED: Now sends full ChatMessage object
     [SocketEvents.TypingStart]: (roomId: string, username: string, isTyping: boolean) => void; // MODIFIED: Added isTyping
     [SocketEvents.TypingStop]: (roomId: string, username: string, isTyping: boolean) => void; // MODIFIED: Added isTyping
     // NEW: Message status acknowledgments
-    [SocketEvents.MessageDelivered]: (data: { roomId: string; messageId: string; recipientUsername: string }) => void;
+    [SocketEvents.MessageDelivered]: (roomId: string, messageId: string, recipientUsername: string) => void; // Corrected to match emit in useSocket.ts
     [SocketEvents.MessagesSeen]: (data: { roomId: string; messageIds: string[]; username: string }[]) => void; // Array of seen messages
 
     // WebRTC related client-to-server events
-    [SocketEvents.CallUser]: (data: { targetUser: string; offer: RTCSessionDescriptionInit; roomId: string }) => void;
-    [SocketEvents.MakeAnswer]: (data: { to: string; answer: RTCSessionDescriptionInit; roomId: string }) => void;
-    [SocketEvents.SendIceCandidate]: (data: { to: string; candidate: RTCIceCandidateInit; roomId: string }) => void;
-    [SocketEvents.RejectCall]: (data: { to: string; roomId: string }) => void;
-    [SocketEvents.EndCall]: (data: { to: string; roomId: string }) => void;
-    [SocketEvents.AcceptCall]: (data: { to: string; roomId: string }) => void;
+    [SocketEvents.CallUser]: (targetUser: string, offer: RTCSessionDescriptionInit, roomId: string) => void; // Corrected to match emit in useSocket.ts
+    [SocketEvents.MakeAnswer]: (to: string, answer: RTCSessionDescriptionInit, roomId: string) => void; // Corrected to match emit in useSocket.ts
+    [SocketEvents.SendIceCandidate]: (to: string, candidate: RTCIceCandidateInit, roomId: string) => void; // Corrected to match emit in useSocket.ts
+    [SocketEvents.RejectCall]: (to: string, roomId: string) => void; // Corrected to match emit in useSocket.ts
+    [SocketEvents.EndCall]: (to: string, roomId: string) => void; // Corrected to match emit in useSocket.ts
+    [SocketEvents.AcceptCall]: (to: string, roomId: string) => void; // Corrected to match emit in useSocket.ts
 
 
     // Server emits (to client)
@@ -133,6 +134,10 @@ export interface VideoCallState {
     localStream: MediaStream | null;
     remoteStream: MediaStream | null;
     callDuration: number;
+    // NEW: Add incoming call state
+    incomingCallOffer: RTCSessionDescriptionInit | null;
+    incomingCallerUsername: string | null;
+    callStartTime: number | null; // Timestamp when call started
 }
 
 // WebRTC signaling messages - Your provided interface is perfect for this.
