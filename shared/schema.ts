@@ -11,7 +11,7 @@ export const users = pgTable("users", {
 
 // Chat room schema for room-based messaging
 export const chatRooms = pgTable("chat_rooms", {
-    id: serial("id").primaryId(),
+    id: serial("id").primaryKey(),
     roomId: text("room_id").notNull().unique(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
 });
