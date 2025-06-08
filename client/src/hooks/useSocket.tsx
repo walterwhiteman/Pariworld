@@ -17,7 +17,7 @@ interface SocketContextType {
     // Chat-related methods
     joinRoom: (roomId: string, username: string) => void;
     leaveRoom: (roomId: string, username: string) => void;
-    sendMessage: (message: ChatMessage) => void; // MODIFIED: Now accepts full ChatMessage
+    sendMessage: (message: ChatMessage) => void;
     sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
     // NEW: Message status acknowledgment methods
     emitMessageDelivered: (data: { roomId: string; messageId: string; recipientUsername: string }) => void;
@@ -142,6 +142,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
     const emit = useCallback(<K extends keyof SocketEventHandlers>(eventName: K, ...args: Parameters<SocketEventHandlers[K]>) => {
         if (socket && socket.connected) {
             // Need to cast to any because TS struggles with spread args and generic keys
+            // This cast is generally safe here because the 'args' are derived from Parameters<SocketEventHandlers[K]>
             (socket.emit as any)(eventName, ...args);
             console.log(`[Socket.emit] Emitted event: ${eventName}`, ...args);
         } else {
@@ -171,9 +172,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // Specific chat-related event emitters, using the generic 'emit' function
     const joinRoom = useCallback((roomId: string, username: string) => {
-        // The callback for join-room is handled internally by the useSocket hook in its useEffect
-        // We are passing the callback directly to the emit method which will be handled by the backend logic.
-        emit(SocketEvents.JoinRoom, roomId, username, (response: { success: boolean; message?: string }) => {
+        // CORRECTED: Emit the data as a single object payload to match backend common practice
+        emit(SocketEvents.JoinRoom, { roomId, username }, (response: { success: boolean; message?: string }) => {
             // This callback is for the client-side response to the join-room emit
             if (!response.success) {
                 console.error('Failed to join room (from callback):', response.message);
@@ -181,6 +181,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
             }
         });
     }, [emit]);
+
 
     const leaveRoom = useCallback((roomId: string, username: string) => {
         emit(SocketEvents.LeaveRoom, roomId, username);
