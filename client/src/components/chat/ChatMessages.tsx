@@ -1,3 +1,4 @@
+// src/components/chat/ChatMessages.tsx
 import { useEffect, useRef } from 'react';
 import { ChatMessage } from '@/types/chat';
 import { User } from 'lucide-react';
@@ -6,14 +7,15 @@ interface ChatMessagesProps {
   messages: ChatMessage[];
   currentUsername: string;
   typingUser?: string;
-  onImageClick: (imageUrl: string) => void; // <-- ADDED THIS PROP
+  onImageClick: (imageUrl: string) => void;
+  className?: string; // IMPORTANT: Ensure this prop is defined
 }
 
 /**
  * Chat messages container component that displays all messages in a scrollable area
  * Handles message rendering, auto-scrolling, and typing indicators
  */
-export function ChatMessages({ messages, currentUsername, typingUser, onImageClick }: ChatMessagesProps) { // <-- ADDED onImageClick to destructuring
+export function ChatMessages({ messages, currentUsername, typingUser, onImageClick, className }: ChatMessagesProps) { // IMPORTANT: Add className to destructuring
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +72,8 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
     return (
       <div
         key={message.id}
+        // Tailwind's space-y-4 on the parent div handles vertical spacing between messages.
+        // If individual messages had `mt-X` before, ensure it's removed if space-y is preferred.
         className={`flex items-start space-x-3 ${isSelf ? 'flex-row-reverse space-x-reverse' : ''}`}
       >
         {/* Avatar */}
@@ -102,9 +106,8 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
                 <img
                   src={message.imageData}
                   alt="Shared image"
-                  // ADDED/MODIFIED THESE CLASSES FOR THUMBNAIL VIEW
                   className="w-40 h-40 object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => onImageClick(message.imageData!)} // <-- MODIFIED onClick to use onImageClick prop
+                  onClick={() => onImageClick(message.imageData!)}
                 />
               </div>
             )}
@@ -163,10 +166,14 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
   };
 
   return (
-    <main className="flex flex-1 flex-col overflow-hidden">
+    // MODIFIED LINE: Apply the passed 'className' prop here.
+    // This allows chat.tsx to control overflow and padding directly on this component.
+    <main className={`flex flex-1 flex-col ${className}`}>
       <div
         ref={containerRef}
-        className="flex-1 space-y-4 overflow-y-auto p-4"
+        // MODIFIED LINE: Removed hardcoded 'p-4' and 'overflow-y-auto'
+        // These are now expected to come from the 'className' prop applied to the parent <main>
+        className="flex-1 space-y-4" // 'flex-1' ensures it grows, 'space-y-4' provides spacing between messages
         style={{ scrollBehavior: 'smooth' }}
       >
         {/* Render all messages */}
