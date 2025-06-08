@@ -93,7 +93,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
         {/* Message Content & Info Wrapper */}
         {/* MODIFIED: Changed max-w-* to max-w-[75%] to ensure a consistent gap on the opposite side. */}
         <div
-          className={`max-w-[75%] ${ // THIS IS THE MODIFIED LINE
+          className={`max-w-[60%] ${ // THIS IS THE MODIFIED LINE
             isSelf ? 'ml-auto' : 'mr-auto' // 'ml-auto' pushes it to the right for self, 'mr-auto' pushes it to the left for others
           }`}
         >
