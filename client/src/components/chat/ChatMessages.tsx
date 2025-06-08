@@ -91,10 +91,9 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
         </div>
 
         {/* Message Content & Info Wrapper */}
-        {/* MODIFIED: Removed 'flex-1' and added 'ml-auto' or 'mr-auto' for correct horizontal alignment.
-                     This allows the div to shrink-wrap its content up to max-w-*. */}
+        {/* MODIFIED: Changed max-w-* to max-w-[75%] to ensure a consistent gap on the opposite side. */}
         <div
-          className={`max-w-xs sm:max-w-sm lg:max-w-md ${
+          className={`max-w-[75%] ${ // THIS IS THE MODIFIED LINE
             isSelf ? 'ml-auto' : 'mr-auto' // 'ml-auto' pushes it to the right for self, 'mr-auto' pushes it to the left for others
           }`}
         >
@@ -171,7 +170,7 @@ export function ChatMessages({ messages, currentUsername, typingUser, onImageCli
   };
 
   return (
-    // MODIFIED LINE: Apply the passed 'className' prop here.
+    // Apply the passed 'className' prop here.
     // This allows chat.tsx to control overflow and padding directly on this component.
     <main className={`flex flex-1 flex-col ${className}`}>
       <div
