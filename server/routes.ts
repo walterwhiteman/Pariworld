@@ -14,6 +14,9 @@ interface ChatMessage {
     imageData: string | null;
     messageType: 'text' | 'image' | 'system';
     timestamp: Date;
+    // --- MODIFICATION STARTS HERE ---
+    status: 'sent' | 'delivered' | 'seen'; // Added message status
+    // --- MODIFICATION ENDS HERE ---
 }
 
 interface ConnectedClientInfo {
@@ -163,7 +166,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                             content: msg.content,
                             imageData: msg.imageData,
                             messageType: msg.messageType,
-                            timestamp: msg.timestamp.toISOString() // Convert Date to ISO string for transport
+                            timestamp: msg.timestamp.toISOString(), // Convert Date to ISO string for transport
+                            status: msg.status // Include the message status
                         }))
                     });
                 }
@@ -215,7 +219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 socket.leave(leavingRoomId);
                 usernameToSocketIdMap.delete(leavingUsername); // Remove from our map
             } else {
-                console.warn(`Leave room: Mismatched socket ID for user ${leavingUsername}. Expected ${usernameToSocketIdMap.get(leavingUsername)}, got ${socket.id}. Proceeding based on socket.data.`);
+                console.warn(`Leave room: Mismatched socket ID for user ${leavingUsername}. Expected ${usernameToSocketIdMap.get(leavingUsername) || 'no entry'}, got ${socket.id}. Proceeding based on socket.data.`);
             }
 
             console.log(`User ${leavingUsername} (Socket ID: ${socket.id}) leaving room ${leavingRoomId}`);
@@ -272,6 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 content: messageData.content || null,
                 imageData: messageData.imageData || null,
                 messageType: messageData.messageType || 'text',
+                // Status defaults to 'sent' in the database schema
             };
 
             let savedMessage: ChatMessage;
@@ -293,11 +298,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 content: savedMessage.content,
                 imageData: savedMessage.imageData,
                 messageType: savedMessage.messageType,
-                timestamp: savedMessage.timestamp.toISOString()
+                timestamp: savedMessage.timestamp.toISOString(),
+                status: savedMessage.status // Include the initial 'sent' status
             });
 
             console.log(`Message sent in room ${roomId} by ${username}`);
         });
+
+        // --- MODIFICATION STARTS HERE ---
+
+        socket.on('message-delivered', async ({ messageId }: { messageId: string }) => {
+            console.log(`[Socket.IO] Received message-delivered for ID: ${messageId}`);
+            try {
+                await storage.updateMessageStatus(messageId, 'delivered');
+                const updatedMessage = await storage.getMessageById(messageId);
+
+                if (updatedMessage) {
+                    console.log(`[Socket.IO] Message ${messageId} status updated to 'delivered' in DB. Notifying sender.`);
+                    const senderSocketId = usernameToSocketIdMap.get(updatedMessage.sender);
+                    if (senderSocketId) {
+                        io.to(senderSocketId).emit('message-status-update', {
+                            messageId: updatedMessage.id,
+                            status: 'delivered',
+                            // Optionally send timestamp of delivery for precision
+                            deliveredAt: new Date().toISOString()
+                        });
+                    } else {
+                        console.warn(`[Socket.IO] Sender ${updatedMessage.sender} for message ${messageId} not found in map. Cannot send delivery update.`);
+                    }
+                } else {
+                    console.warn(`[Socket.IO] Could not find message with ID ${messageId} after delivery confirmation.`);
+                }
+            } catch (error) {
+                console.error(`[Socket.IO] Error handling message-delivered for ${messageId}:`, error);
+                // Consider emitting an error back to the client if necessary
+            }
+        });
+
+        socket.on('messages-seen', async ({ messageIds }: { messageIds: string[] }) => {
+            console.log(`[Socket.IO] Received messages-seen for IDs:`, messageIds);
+            const updatedSenders = new Set<string>(); // Keep track of unique senders to notify
+
+            for (const messageId of messageIds) {
+                try {
+                    await storage.updateMessageStatus(messageId, 'seen');
+                    const updatedMessage = await storage.getMessageById(messageId);
+
+                    if (updatedMessage) {
+                        updatedSenders.add(updatedMessage.sender); // Add sender to set
+                        console.log(`[Socket.IO] Message ${messageId} status updated to 'seen' in DB.`);
+                    } else {
+                        console.warn(`[Socket.IO] Could not find message with ID ${messageId} after seen confirmation.`);
+                    }
+                } catch (error) {
+                    console.error(`[Socket.IO] Error handling messages-seen for ${messageId}:`, error);
+                }
+            }
+
+            // After processing all messages, notify each unique sender
+            for (const sender of Array.from(updatedSenders)) {
+                const senderSocketId = usernameToSocketIdMap.get(sender);
+                if (senderSocketId) {
+                    io.to(senderSocketId).emit('message-status-update', {
+                        messageIds: messageIds, // Send all message IDs that were seen
+                        status: 'seen',
+                        seenAt: new Date().toISOString()
+                    });
+                    console.log(`[Socket.IO] Notified sender ${sender} of 'seen' status for messages.`);
+                } else {
+                    console.warn(`[Socket.IO] Sender ${sender} not found in map. Cannot send 'seen' update.`);
+                }
+            }
+        });
+
+        // --- MODIFICATION ENDS HERE ---
 
         socket.on('typing-start', ({ roomId, username }) => {
             // Broadcast to all in the room EXCEPT the sender
