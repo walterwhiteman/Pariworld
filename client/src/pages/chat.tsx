@@ -108,7 +108,8 @@ export default function ChatPage() {
     }, []);
 
     const dismissNotification = useCallback((id: string) => {
-        setNotifications(prev => prev.filter(n => n.id === id)); // CORRECTED: Should filter OUT the dismissed notification
+        // CORRECTED: This should filter OUT the dismissed notification
+        setNotifications(prev => prev.filter(n => n.id !== id));
     }, []);
 
     const handleImageClick = useCallback((imageUrl: string) => {
