@@ -410,7 +410,7 @@ export default function ChatPage() {
             roomId={roomState.roomId}
             isConnected={roomState.isConnected}
             participantCount={roomState.participants.length}
-            onStartVideoCall={handleStartVideoCall} {/* Changed to new handler */}
+            onStartVideoCall={handleStartVideoCall} 
             onLeaveRoom={handleLeaveRoom}
           />
 
