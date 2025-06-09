@@ -45,12 +45,13 @@ export function SocketProvider({ children }: SocketProviderProps) {
             transports: ['polling', 'websocket'],
             withCredentials: true, // Important for CORS and session handling
             // Removed forceNew: true to allow socket.io's internal reconnection to manage the instance
-            pingInterval: 30000, // Keep-alive ping interval (default 25000)
-            pingTimeout: 25000, // How long to wait for a pong before disconnecting (default 20000)
-            reconnectionAttempts: Infinity, // Allow infinite reconnection attempts (default Infinity)
-            reconnectionDelay: 1000, // Initial delay before reconnection attempt (default 1000)
-            reconnectionDelayMax: 5000, // Max delay between reconnection attempts (default 5000)
-            randomizationFactor: 0.5 // Randomization factor for reconnection delay (default 0.5)
+            // forceNew: true, // Forces a new connection for each instance - REMOVED FOR STABILITY
+            pingInterval: 30000, // Keep-alive ping interval
+            pingTimeout: 25000,  // How long to wait for a pong before disconnecting
+            reconnectionAttempts: Infinity, // Allow infinite reconnection attempts
+            reconnectionDelay: 1000, // Initial delay before reconnection attempt
+            reconnectionDelayMax: 5000, // Max delay between reconnection attempts
+            randomizationFactor: 0.5 // Randomization factor for reconnection delay
         } as Partial<ManagerOptions & SocketOptions>); // Type assertion for options compatibility
 
         // Set the socket instance immediately after creation.
@@ -69,6 +70,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         socketInstance.on('disconnect', (reason) => {
             console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
             setIsConnected(false);
+            // DO NOT setSocket(undefined) here. Let the socketInstance manage its own state internally.
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
             } else {
@@ -79,14 +81,15 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Event listener for connection errors
         socketInstance.on('connect_error', (error) => {
             console.error('[SocketProvider] Socket.IO connection error! (Frontend):',
-                error.message,
-                'Description:', (error as any).description,
-                'Type:', (error as any).type,
-                'Event:', (error as any).event,
-                'Reason:', (error as any).reason,
-                error.stack);
+                                error.message,
+                                'Description:', (error as any).description,
+                                'Type:', (error as any).type,
+                                'Event:', (error as any).event,
+                                'Reason:', (error as any).reason,
+                                error.stack);
             setConnectionError(`Connection failed: ${error.message}`);
-            // isConnected will be set to false by 'disconnect' if the error leads to a full disconnect
+            setIsConnected(false);
+            // DO NOT setSocket(undefined) here.
         });
 
         // Event listener for reconnection attempts
@@ -106,13 +109,14 @@ export function SocketProvider({ children }: SocketProviderProps) {
         socketInstance.on('reconnect_error', (error) => {
             console.error('[SocketProvider] Reconnect error:', error.message);
             setConnectionError(`Reconnect failed: ${error.message}`);
+            // DO NOT setSocket(undefined) here.
         });
 
         // Event listener for permanent reconnection failure
         socketInstance.on('reconnect_failed', () => {
             console.error('[SocketProvider] Reconnect failed permanently.');
             setConnectionError('Reconnect failed permanently. Please refresh.');
-            setIsConnected(false); // Explicitly set to false if all attempts fail
+            // DO NOT setSocket(undefined) here.
         });
 
         // Cleanup function: disconnect socket when component unmounts
@@ -165,38 +169,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     // Specific chat-related event emitters, using the generic 'emit' function
     const joinRoom = useCallback((roomId: string, username: string) => {
-        if (!socket) {
-            setConnectionError('Socket not initialized. Cannot join room. Please refresh.');
-            return;
-        }
-
-        // Use the React state for connection status
-        if (!isConnected) {
-            console.warn('Socket: Attempted to join room while disconnected. Forcing reconnect and deferring join.');
-            setConnectionError('Connecting to server... please wait.');
-
-            // Add a one-time listener to join the room once connected
-            const onConnectAndJoin = () => {
-                console.log('Socket: Reconnected, attempting to join room...');
-                // Now that we're connected, emit the join-room event
-                socket.emit(SocketEvents.JoinRoom, { roomId, username });
-                socket.off('connect', onConnectAndJoin); // Remove this listener immediately after use
-            };
-            socket.on('connect', onConnectAndJoin);
-
-            // Explicitly force the socket to connect (if it's not already connecting)
-            // The useEffect hook already calls socket.connect() on mount, but this ensures it attempts it again if needed.
-            // This check prevents redundant connect calls if Socket.IO is already in a reconnection attempt.
-            if (!socket.connected && !socket.io.reconnecting) {
-                 socket.connect();
-            }
-            return; // Return early, the join-room emit will happen after 'connect'
-        }
-
-        // If already connected, just emit the join-room event
-        console.log(`[Socket.emit] Emitted event: ${SocketEvents.JoinRoom} for ${roomId} as ${username}`);
-        socket.emit(SocketEvents.JoinRoom, { roomId, username });
-    }, [socket, isConnected, emit]); // Depend on socket, isConnected state, and the emit function
+        emit(SocketEvents.JoinRoom, { roomId, username });
+    }, [emit]);
 
     const leaveRoom = useCallback((roomId: string, username: string) => {
         emit(SocketEvents.LeaveRoom, { roomId, username });
