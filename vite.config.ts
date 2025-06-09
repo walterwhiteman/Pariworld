@@ -1,4 +1,3 @@
-// vite.config.ts
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -9,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export default defineConfig({
-  root: './client', // <-- CORRECT: Tells Vite to use the 'client' directory as its root
+  root: './client', // <-- ADDED THIS LINE: Tells Vite to use the 'client' directory as its root
   plugins: [
     react(),
     // Custom plugin for runtime error overlay (optional)
@@ -47,9 +46,7 @@ export default defineConfig({
       };
     },
     // Conditionally add cartographer if in dev and Replit
-    // Removed `cartographer()` from here if it was causing issues with Render or not properly defined.
-    // If you need it, ensure it's defined and included correctly.
-    ...(process.env.NODE_ENV === "development" && process.env.REPL_ID ? [] : []),
+    ...(process.env.NODE_ENV === "development" && process.env.REPL_ID ? [/* cartographer() removed or correctly defined here */] : []),
   ],
   server: {
     host: "0.0.0.0",
@@ -63,13 +60,18 @@ export default defineConfig({
   resolve: {
     alias: {
       // Aliases defined here are now relative to the `root` ('./client')
+      // So, '@/...' will resolve to 'client/src' from Vite's perspective.
+      // But since __dirname in vite.config.ts is the project root,
+      // path.resolve(__dirname, './client/src') is still correct for the alias definition.
+      // They are just path mapping, not actual file resolution from Vite's root.
       "@": path.resolve(__dirname, "./client/src"),
       "@shared": path.resolve(__dirname, "./shared"),
     },
   },
   build: {
     // outDir is relative to the `root` if not an absolute path.
-    outDir: '../dist/client', // <-- CORRECT: Go up one level from 'client', then into 'dist/client'
+    // We want it to be `dist/client` relative to the project root.
+    outDir: '../dist/client', // <-- CHANGED THIS: Go up one level from 'client', then into 'dist/client'
     emptyOutDir: true,
   },
 });
