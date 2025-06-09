@@ -66,14 +66,12 @@ export default function ChatPage() {
         };
     }, []);
 
-    // --- START: MODIFIED useEffect for Browser Navigation Handling ---
+    // --- START: MODIFIED useEffect for Browser Navigation Handling with beforeunload ---
     useEffect(() => {
-        // A unique identifier for our controlled history state
         const HISTORY_STATE_ID = 'chat-room-controlled-state';
 
         // On component mount, add a new dummy entry to the history stack.
         // This is crucial: pushState adds a *new* entry, so when user clicks back, they hit this first.
-        // This effectively "traps" the user on the current page as they'll hit our dummy state.
         window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
         console.log('ChatPage: Pushed controlled dummy history entry on mount.');
 
@@ -82,26 +80,32 @@ export default function ChatPage() {
             console.log('ChatPage: Popstate event detected.');
             // Always push back our dummy state to prevent actual navigation.
             // This ensures that hitting back keeps them on the current page.
-            // We use pushState here to add a new entry, so the browser doesn't actually leave this page.
             window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
             console.log('ChatPage: Browser back/forward button intercepted. Re-pushed controlled state.');
-            // Optionally, you could show a confirmation modal here, but for strict prevention,
-            // simply pushing the state back is sufficient.
         };
 
-        // Add the event listener for popstate
-        window.addEventListener('popstate', handlePopState);
+        // Event listener for beforeunload (tab/window close, refresh, direct URL navigation, or swipe back)
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            // Standard for showing a confirmation message.
+            // Some browsers require returnValue to be set for the dialog to appear.
+            event.preventDefault(); // Prevents the default action (navigation)
+            event.returnValue = ''; // Required for Chrome, Safari to display the custom message
+            console.log('ChatPage: beforeunload event detected, prompting user for confirmation.');
+            // Note: The message displayed to the user is typically a generic browser message
+            // and cannot be customized by the website for security reasons.
+        };
 
-        // Cleanup function: remove the event listener when the component unmounts
+        window.addEventListener('popstate', handlePopState);
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Cleanup function: remove the event listeners when the component unmounts
         return () => {
-            console.log('ChatPage: Cleaning up popstate listener.');
+            console.log('ChatPage: Cleaning up popstate and beforeunload listeners.');
             window.removeEventListener('popstate', handlePopState);
-            // Note: If the component unmounts (e.g., you navigate away via an *internal* app link),
-            // this cleanup will run. The dummy history entry might still exist depending on the browser.
-            // For a single-page app where you want to strictly disable back, this is generally okay.
+            window.removeEventListener('beforeunload', handleBeforeUnload);
         };
     }, []); // Empty dependency array, runs once on mount
-    // --- END: MODIFIED useEffect for Browser Navigation Handling ---
+    // --- END: MODIFIED useEffect for Browser Navigation Handling with beforeunload ---
 
 
     useEffect(() => {
