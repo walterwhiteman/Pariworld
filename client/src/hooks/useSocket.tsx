@@ -1,9 +1,7 @@
 // src/hooks/useSocket.ts
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import io, { Socket, SocketOptions, ManagerOptions } from 'socket.io-client';
-// Use relative path to avoid potential alias resolution issues on Render
-// Also import SocketEventHandlers for strong typing the Socket instance
-import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat'; // Ensure this path is correct based on your project structure
+import { ChatMessage, SocketEvents, SocketEventHandlers } from '../types/chat'; // Ensure this path is correct
 
 // Define the shape of the context value
 interface SocketContextType {
@@ -19,8 +17,6 @@ interface SocketContextType {
     leaveRoom: (roomId: string, username: string) => void;
     sendMessage: (message: ChatMessage) => void;
     sendTypingStatus: (roomId: string, username: string, isTyping: boolean) => void;
-    // NEW: Message status acknowledgment methods
-    // FIX: Changed data structure for emitMessageDelivered to expect a single object
     emitMessageDelivered: (data: { roomId: string; messageId: string; recipientUsername: string }) => void;
     emitMessagesSeen: (data: { roomId: string; messageIds: string[]; username: string }[]) => void;
 
@@ -49,23 +45,24 @@ export function SocketProvider({ children }: SocketProviderProps) {
     const [isConnected, setIsConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
 
-    // Use the Render backend URL
-    const BACKEND_URL = 'https://pariworld-backend.onrender.com';
+    // Use the Render backend URL, or a fallback for local development if needed
+    const BACKEND_URL = import.meta.env.VITE_SERVER_URL || 'https://pariworld-backend.onrender.com';
 
     // This useEffect initializes the Socket.IO client ONLY ONCE when the provider mounts
     useEffect(() => {
-        console.log('[SocketProvider useEffect] Initializing Socket.IO client.');
+        console.log(`[SocketProvider useEffect] Initializing Socket.IO client for URL: ${BACKEND_URL}`);
+
         const socketInstance = io(BACKEND_URL, {
             path: '/ws', // Aligning client path with backend's /ws
-            transports: ['polling', 'websocket'],
+            transports: ['websocket', 'polling'], // Prioritize websocket for better performance
             withCredentials: true, // Important for CORS and session handling
-            pingInterval: 30000,
-            pingTimeout: 25000,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            randomizationFactor: 0.5
-        } as Partial<ManagerOptions & SocketOptions>);
+            pingInterval: 30000,   // Client sends a ping every 30 seconds
+            pingTimeout: 25000,    // Client waits 25 seconds for a pong response
+            reconnectionAttempts: Infinity, // Attempt to reconnect indefinitely
+            reconnectionDelay: 1000, // Start with 1 second delay
+            reconnectionDelayMax: 5000, // Max 5 seconds delay between attempts
+            randomizationFactor: 0.5 // Randomize delay (e.g., 0.5 * 1000 = 500ms to 1500ms)
+        } as Partial<ManagerOptions & SocketOptions>); // Explicitly type options
 
         setSocket(socketInstance);
 
@@ -84,12 +81,12 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
         // Event listener for disconnection
         socketInstance.on('disconnect', (reason) => {
-            console.log('[SocketProvider] Socket.IO disconnected! (Frontend):', reason);
+            console.log(`[SocketProvider] Socket.IO disconnected! (Frontend). Reason: "${reason}"`);
             setIsConnected(false); // Immediately set to false on disconnect
             if (reason === 'io server disconnect') {
                 setConnectionError('Disconnected by server. Attempting to reconnect...');
             } else {
-                setConnectionError(`Disconnected: ${reason}`);
+                setConnectionError(`Disconnected: ${reason}. Attempting to reconnect...`);
             }
         });
 
@@ -122,7 +119,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
         // Event listener for permanent reconnection failure
         socketInstance.on('reconnect_failed', () => {
             console.error('[SocketProvider] Reconnect failed permanently.');
-            setConnectionError('Reconnect failed permanently. Please refresh.');
+            setConnectionError('Reconnect failed permanently. Please refresh the page.');
         });
 
         // Cleanup function: disconnect socket when component unmounts
@@ -133,7 +130,7 @@ export function SocketProvider({ children }: SocketProviderProps) {
                 socketInstance.disconnect(); // Disconnect the socket
             }
         };
-    }, [BACKEND_URL]);
+    }, [BACKEND_URL]); // Depend on BACKEND_URL to re-initialize if it changes
 
     /**
      * Emits a Socket.IO event to the server, with type safety.
@@ -148,6 +145,8 @@ export function SocketProvider({ children }: SocketProviderProps) {
             console.log(`[Socket.emit] Emitted event: ${eventName}`, ...args);
         } else {
             console.warn(`[Socket.emit] Cannot emit event '${eventName}' - Socket.IO is not connected or not initialized.`);
+            // Optionally, you might want to queue events or show a UI message
+            setConnectionError('Socket not connected. Please wait or refresh.');
         }
     }, [socket]);
 
@@ -183,21 +182,16 @@ export function SocketProvider({ children }: SocketProviderProps) {
         });
     }, [emit]);
 
-
     const leaveRoom = useCallback((roomId: string, username: string) => {
         emit(SocketEvents.LeaveRoom, roomId, username);
     }, [emit]);
 
-    // MODIFIED: sendMessage now accepts full ChatMessage as per types/chat.ts
     const sendMessage = useCallback((message: ChatMessage) => {
         emit(SocketEvents.SendMessage, message);
     }, [emit]);
 
     const sendTypingStatus = useCallback((roomId: string, username: string, isTyping: boolean) => {
-        // The SocketEventHandlers defined typing-start and typing-stop with `isTyping` as a parameter.
-        // It's more efficient to have one event 'typing-status' on the backend that takes 'isTyping'.
-        // However, if your backend strictly expects 'typing-start' or 'typing-stop', you'll use the respective event.
-        // Based on the provided types, I'll use the explicit start/stop events.
+        // Based on SocketEventHandlers, you have TypingStart and TypingStop events.
         if (isTyping) {
             emit(SocketEvents.TypingStart, roomId, username, isTyping);
         } else {
@@ -205,19 +199,14 @@ export function SocketProvider({ children }: SocketProviderProps) {
         }
     }, [emit]);
 
-    // NEW: Emit 'message-delivered' acknowledgment
     const emitMessageDelivered = useCallback((data: { roomId: string; messageId: string; recipientUsername: string }) => {
-        // FIX: Sending a single object as the payload to match the server's expected destructuring
         emit(SocketEvents.MessageDelivered, { messageId: data.messageId, roomId: data.roomId, recipientUsername: data.recipientUsername });
     }, [emit]);
 
-    // NEW: Emit 'messages-seen' acknowledgment (can be multiple)
     const emitMessagesSeen = useCallback((data: { roomId: string; messageIds: string[]; username: string }[]) => {
         // The backend expects an array of objects. The 'emit' wrapper will handle passing it.
-        // The SocketEventHandlers for MessagesSeen expects an array of objects directly.
         emit(SocketEvents.MessagesSeen, data);
     }, [emit]);
-
 
     // WebRTC related emits (using SocketEvents enum and generic emit)
     const callUser = useCallback((data: { targetUser: string; offer: RTCSessionDescriptionInit; roomId: string }) => {
