@@ -319,7 +319,9 @@ export default function ChatPage() {
             unsubscribeRoomJoined();
             unsubscribeMessageHistory();
             unsubscribeRoomLeft();
-            unsubscribeRoomReceived();
+            // --- FIX APPLIED HERE ---
+            unsubscribeMessageReceived(); // Corrected from unsubscribeRoomReceived()
+            // --- END FIX ---
             unsubscribeUserTyping();
             unsubscribeConnectionStatus();
             unsubscribeError();
