@@ -59,65 +59,12 @@ export default function ChatPage() {
         formatCallDuration
     } = useWebRTC(socket, roomState.roomId, roomState.username, recipientUsername);
 
-    // --- START: MODIFIED useEffect for Browser Navigation & Service Worker Registration ---
     useEffect(() => {
         console.log('ChatPage: Component mounted.');
-
-        // ------ NEW CODE FOR SERVICE WORKER REGISTRATION START ------
-        if ('serviceWorker' in navigator) {
-            // We use window.addEventListener('load') to ensure the Service Worker
-            // is registered after the entire page has loaded.
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js')
-                    .then(registration => {
-                        // If registration is successful, you'll see this in the console
-                        console.log('Service Worker registered with scope:', registration.scope);
-                    })
-                    .catch(error => {
-                        // If there's an error during registration, you'll see this
-                        console.error('Service Worker registration failed:', error);
-                    });
-            });
-        } else {
-            console.warn('Service Workers are not supported in this browser.');
-        }
-        // ------ NEW CODE FOR SERVICE WORKER REGISTRATION END ------
-
-        // --- Existing code for Browser Navigation Handling ---
-        const HISTORY_STATE_ID = 'chat-room-controlled-state';
-
-        // On component mount, add a new dummy entry to the history stack.
-        window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
-        console.log('ChatPage: Pushed controlled dummy history entry on mount.');
-
-        // Event listener for browser's popstate (back/forward button presses)
-        const handlePopState = (event: PopStateEvent) => {
-            console.log('ChatPage: Popstate event detected.');
-            // Always push back our dummy state to prevent actual navigation.
-            // This ensures that hitting back keeps them on the current page.
-            window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
-            console.log('ChatPage: Browser back/forward button intercepted. Re-pushed controlled state.');
-        };
-
-        // Event listener for beforeunload (tab/window close, refresh, direct URL navigation, or swipe back)
-        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            event.preventDefault(); // Prevents the default action (navigation)
-            event.returnValue = ''; // Required for Chrome, Safari to display the custom message
-            console.log('ChatPage: beforeunload event detected, prompting user for confirmation.');
-        };
-
-        window.addEventListener('popstate', handlePopState);
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        // Cleanup function: remove the event listeners when the component unmounts
         return () => {
-            console.log('ChatPage: Cleaning up popstate and beforeunload listeners.');
-            window.removeEventListener('popstate', handlePopState);
-            window.removeEventListener('beforeunload', handleBeforeUnload);
+            console.log('ChatPage: Component unmounted.');
         };
-    }, []); // Empty dependency array, runs once on mount
-    // --- END: MODIFIED useEffect for Browser Navigation & Service Worker Registration ---
-
+    }, []);
 
     useEffect(() => {
         console.log('ChatPage DEBUG: Current roomState.username:', roomState.username);
