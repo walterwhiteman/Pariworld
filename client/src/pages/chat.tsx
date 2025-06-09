@@ -66,48 +66,6 @@ export default function ChatPage() {
         };
     }, []);
 
-    // --- START: MODIFIED useEffect for Browser Navigation Handling with beforeunload ---
-    useEffect(() => {
-        const HISTORY_STATE_ID = 'chat-room-controlled-state';
-
-        // On component mount, add a new dummy entry to the history stack.
-        // This is crucial: pushState adds a *new* entry, so when user clicks back, they hit this first.
-        window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
-        console.log('ChatPage: Pushed controlled dummy history entry on mount.');
-
-        // Event listener for browser's popstate (back/forward button presses)
-        const handlePopState = (event: PopStateEvent) => {
-            console.log('ChatPage: Popstate event detected.');
-            // Always push back our dummy state to prevent actual navigation.
-            // This ensures that hitting back keeps them on the current page.
-            window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
-            console.log('ChatPage: Browser back/forward button intercepted. Re-pushed controlled state.');
-        };
-
-        // Event listener for beforeunload (tab/window close, refresh, direct URL navigation, or swipe back)
-        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            // Standard for showing a confirmation message.
-            // Some browsers require returnValue to be set for the dialog to appear.
-            event.preventDefault(); // Prevents the default action (navigation)
-            event.returnValue = ''; // Required for Chrome, Safari to display the custom message
-            console.log('ChatPage: beforeunload event detected, prompting user for confirmation.');
-            // Note: The message displayed to the user is typically a generic browser message
-            // and cannot be customized by the website for security reasons.
-        };
-
-        window.addEventListener('popstate', handlePopState);
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        // Cleanup function: remove the event listeners when the component unmounts
-        return () => {
-            console.log('ChatPage: Cleaning up popstate and beforeunload listeners.');
-            window.removeEventListener('popstate', handlePopState);
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-        };
-    }, []); // Empty dependency array, runs once on mount
-    // --- END: MODIFIED useEffect for Browser Navigation Handling with beforeunload ---
-
-
     useEffect(() => {
         console.log('ChatPage DEBUG: Current roomState.username:', roomState.username);
         console.log('ChatPage DEBUG: Current roomState.participants:', roomState.participants);
@@ -155,23 +113,20 @@ export default function ChatPage() {
     }, []);
 
     const handleJoinRoom = useCallback((roomId: string, username: string) => {
-        // This is the updated logic from useSocket.ts now, not handled directly here for consistency
-        // but the notification for connection error is still useful.
-        if (!socket.isConnected && !socket.socket?.io.reconnecting) {
-             addNotification('error', 'Connection Error', 'Unable to connect to chat server. Trying to reconnect...');
+        if (!socket.isConnected) {
+            addNotification('error', 'Connection Error', 'Unable to connect to chat server');
+            return;
         }
-
         setIsConnecting(true);
         setRoomState(prev => ({
             ...prev,
             roomId,
             username,
-            isConnected: false, // Will be set to true by socket.on('room-joined')
+            isConnected: false,
             messages: []
         }));
         socket.joinRoom(roomId, username);
     }, [socket, addNotification]);
-
 
     const handleLeaveRoom = useCallback(() => {
         if (roomState.roomId && roomState.username) {
