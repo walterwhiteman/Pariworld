@@ -66,61 +66,42 @@ export default function ChatPage() {
         };
     }, []);
 
-    // --- START: CORRECTED useEffect for Browser Navigation Handling ---
+    // --- START: MODIFIED useEffect for Browser Navigation Handling ---
     useEffect(() => {
         // A unique identifier for our controlled history state
         const HISTORY_STATE_ID = 'chat-room-controlled-state';
 
-        // Function to create/replace a dummy history entry
-        const createControlledHistoryEntry = () => {
-            // Use replaceState to modify the current history entry.
-            // This prevents the history stack from growing infinitely and ensures
-            // that our controlled state is always the "top" one.
-            window.history.replaceState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
-            console.log('ChatPage: Replaced history state with controlled dummy entry.');
-        };
+        // On component mount, add a new dummy entry to the history stack.
+        // This is crucial: pushState adds a *new* entry, so when user clicks back, they hit this first.
+        // This effectively "traps" the user on the current page as they'll hit our dummy state.
+        window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
+        console.log('ChatPage: Pushed controlled dummy history entry on mount.');
 
         // Event listener for browser's popstate (back/forward button presses)
         const handlePopState = (event: PopStateEvent) => {
             console.log('ChatPage: Popstate event detected.');
-            // Check if the state being popped is our controlled dummy state.
-            // If it is, it means the user pressed back while we were already controlling history.
-            if (event.state && event.state.id === HISTORY_STATE_ID) {
-                console.log('ChatPage: Browser back button intercepted. Re-creating controlled state.');
-                createControlledHistoryEntry(); // Immediately put our controlled state back
-            } else {
-                // This scenario means the user is trying to navigate truly back
-                // to a page *before* our controlled state (e.g., from an external link
-                // or a previous route not managed by this effect).
-                // We still want to prevent them from leaving this tab.
-                console.warn('ChatPage: Popstate event for non-controlled state. User might be truly navigating away. Preventing.');
-                createControlledHistoryEntry(); // Re-establish our controlled state to keep them here.
-            }
+            // Always push back our dummy state to prevent actual navigation.
+            // This ensures that hitting back keeps them on the current page.
+            // We use pushState here to add a new entry, so the browser doesn't actually leave this page.
+            window.history.pushState({ id: HISTORY_STATE_ID }, document.title, window.location.href);
+            console.log('ChatPage: Browser back/forward button intercepted. Re-pushed controlled state.');
+            // Optionally, you could show a confirmation modal here, but for strict prevention,
+            // simply pushing the state back is sufficient.
         };
-
-        // On component mount, ensure our controlled history entry exists.
-        // Use setTimeout to ensure it runs *after* any initial history pushes by routing libraries
-        // or the browser's default behavior, ensuring we're setting the state at the right "top".
-        const timeoutId = setTimeout(() => {
-            createControlledHistoryEntry();
-        }, 0);
-
 
         // Add the event listener for popstate
         window.addEventListener('popstate', handlePopState);
 
-        // Cleanup function: remove the event listener and clear timeout when the component unmounts
+        // Cleanup function: remove the event listener when the component unmounts
         return () => {
-            clearTimeout(timeoutId); // Clear any pending setTimeout
             console.log('ChatPage: Cleaning up popstate listener.');
             window.removeEventListener('popstate', handlePopState);
-            // Optional: If you want to "clean" the history when the user legitimately leaves your app
-            // (e.g., by clicking an in-app "Leave Room" button that navigates them away),
-            // you might want to replace the state with a null or simple entry here.
-            // For now, we'll assume the component unmounts when the app is closed or navigated away externally.
+            // Note: If the component unmounts (e.g., you navigate away via an *internal* app link),
+            // this cleanup will run. The dummy history entry might still exist depending on the browser.
+            // For a single-page app where you want to strictly disable back, this is generally okay.
         };
     }, []); // Empty dependency array, runs once on mount
-    // --- END: CORRECTED useEffect for Browser Navigation Handling ---
+    // --- END: MODIFIED useEffect for Browser Navigation Handling ---
 
 
     useEffect(() => {
@@ -319,9 +300,7 @@ export default function ChatPage() {
             unsubscribeRoomJoined();
             unsubscribeMessageHistory();
             unsubscribeRoomLeft();
-            // --- FIX APPLIED HERE ---
-            unsubscribeMessageReceived(); // Corrected from unsubscribeRoomReceived()
-            // --- END FIX ---
+            unsubscribeMessageReceived();
             unsubscribeUserTyping();
             unsubscribeConnectionStatus();
             unsubscribeError();
