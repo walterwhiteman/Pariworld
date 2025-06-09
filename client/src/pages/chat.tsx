@@ -66,6 +66,48 @@ export default function ChatPage() {
         };
     }, []);
 
+    // --- START: NEW useEffect for Browser Navigation Handling ---
+    useEffect(() => {
+        const handlePopState = (event: PopStateEvent) => {
+            // This function runs when the browser's history state changes
+            // (e.g., user presses back/forward button).
+
+            console.log('ChatPage: Browser back button detected. Preventing navigation.');
+            // Re-push the current state to the history stack.
+            // This effectively "cancels" the back navigation, keeping the user on the current page.
+            window.history.pushState(null, document.title, window.location.href);
+
+            // Optional: You could add a confirmation dialog here if you want to ask the user
+            // "Are you sure you want to leave the room?"
+            // if (confirm("Are you sure you want to leave the chat room?")) {
+            //     // If they confirm, you might want to call handleLeaveRoom()
+            //     // and then allow navigation: history.back();
+            //     handleLeaveRoom(); // Or a custom function to navigate away
+            // } else {
+            //     // If they cancel, prevent navigation by re-pushing state
+            //     window.history.pushState(null, document.title, window.location.href);
+            // }
+        };
+
+        // When the ChatPage mounts, add a new history entry for the current URL.
+        // This is important. If the user navigates to your app directly (e.g., from an external link),
+        // and then presses back, without this, they might leave your entire website.
+        // By pushing a state here, the first back button press will simply trigger popstate
+        // for this state, which we can then intercept.
+        window.history.pushState(null, document.title, window.location.href);
+
+        // Add the event listener for popstate
+        window.addEventListener('popstate', handlePopState);
+
+        // Cleanup function: remove the event listener when the component unmounts
+        return () => {
+            console.log('ChatPage: Cleaning up popstate listener.');
+            window.removeEventListener('popstate', handlePopState);
+        };
+    }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
+    // --- END: NEW useEffect for Browser Navigation Handling ---
+
+
     useEffect(() => {
         console.log('ChatPage DEBUG: Current roomState.username:', roomState.username);
         console.log('ChatPage DEBUG: Current roomState.participants:', roomState.participants);
@@ -113,20 +155,23 @@ export default function ChatPage() {
     }, []);
 
     const handleJoinRoom = useCallback((roomId: string, username: string) => {
-        if (!socket.isConnected) {
-            addNotification('error', 'Connection Error', 'Unable to connect to chat server');
-            return;
+        // This is the updated logic from useSocket.ts now, not handled directly here for consistency
+        // but the notification for connection error is still useful.
+        if (!socket.isConnected && !socket.socket?.io.reconnecting) {
+             addNotification('error', 'Connection Error', 'Unable to connect to chat server. Trying to reconnect...');
         }
+
         setIsConnecting(true);
         setRoomState(prev => ({
             ...prev,
             roomId,
             username,
-            isConnected: false,
+            isConnected: false, // Will be set to true by socket.on('room-joined')
             messages: []
         }));
         socket.joinRoom(roomId, username);
     }, [socket, addNotification]);
+
 
     const handleLeaveRoom = useCallback(() => {
         if (roomState.roomId && roomState.username) {
